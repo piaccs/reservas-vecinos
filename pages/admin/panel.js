@@ -94,8 +94,12 @@ export default function AdminPanel() {
   async function agregarClub() {
     if (!nuevoClub.motivo.trim()) return alert('Escribe el nombre del club')
     if (nuevoClub.tipo === 'pagado' && !nuevoClub.monto) return alert('Escribe el monto')
-    for (const d of diasClub) {
-      if (parseInt(d.hora_fin) <= parseInt(d.hora_inicio)) return alert('La hora de término debe ser mayor a la de inicio en todos los días')
+    const diasValidos = diasClub.every(d => parseInt(d.hora_fin) > parseInt(d.hora_inicio))
+    if (!diasValidos) {
+      // Auto-fix: set hora_fin to hora_inicio + 1
+      setDiasClub(prev => prev.map(d => ({ ...d, hora_fin: parseInt(d.hora_fin) <= parseInt(d.hora_inicio) ? parseInt(d.hora_inicio) + 1 : parseInt(d.hora_fin) })))
+      setGuardandoClub(false)
+      return alert('Se corrigieron las horas automáticamente. Intenta de nuevo.')
     }
     setGuardandoClub(true)
 
