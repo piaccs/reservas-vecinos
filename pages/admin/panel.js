@@ -95,7 +95,7 @@ export default function AdminPanel() {
     if (!nuevoClub.motivo.trim()) return alert('Escribe el nombre del club')
     if (nuevoClub.tipo === 'pagado' && !nuevoClub.monto) return alert('Escribe el monto')
     for (const d of diasClub) {
-      if (d.hora_fin <= d.hora_inicio) return alert('La hora de término debe ser mayor a la de inicio en todos los días')
+      if (parseInt(d.hora_fin) <= parseInt(d.hora_inicio)) return alert('La hora de término debe ser mayor a la de inicio en todos los días')
     }
     setGuardandoClub(true)
 
