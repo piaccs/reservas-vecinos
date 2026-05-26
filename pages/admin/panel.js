@@ -48,6 +48,10 @@ export default function AdminPanel() {
   const [reservasReporte, setReservasReporte] = useState([])
   const [bloqueosReporte, setBloqueosReporte] = useState([])
   const [cargandoReporte, setCargandoReporte] = useState(false)
+  const [pagosClubs, setPagosClubs] = useState([])
+  const [clubesSemanales, setClubesSemanales] = useState([])
+  const [nuevoPago, setNuevoPago] = useState({ nombre_club: '', monto_pagado: '', fecha_pago: hoyChile(), notas: '' })
+  const [guardandoPago, setGuardandoPago] = useState(false)
 
   // Reservas
   const [todasReservas, setTodasReservas] = useState([])
@@ -141,6 +145,55 @@ export default function AdminPanel() {
     await cargarClubes()
   }
 
+  async function cargarPagosClubs(mes) {
+    const { data } = await supabase.from('pagos_clubes').select('*').eq('mes', mes).order('fecha_pago')
+    setPagosClubs(data || [])
+  }
+
+  async function cargarClubesSemanales() {
+    const { data } = await supabase.from('bloqueos_semanales').select('*').eq('activo', true)
+    setClubesSemanales(data || [])
+  }
+
+  async function registrarPago() {
+    if (!nuevoPago.nombre_club) return alert('Selecciona el club')
+    if (!nuevoPago.monto_pagado) return alert('Ingresa el monto pagado')
+    if (!nuevoPago.fecha_pago) return alert('Ingresa la fecha de pago')
+    setGuardandoPago(true)
+    const { error } = await supabase.from('pagos_clubes').insert({
+      nombre_club: nuevoPago.nombre_club,
+      mes: mesReporte,
+      monto_pagado: parseInt(nuevoPago.monto_pagado),
+      fecha_pago: nuevoPago.fecha_pago,
+      notas: nuevoPago.notas || null,
+      registrado_por: admin.email
+    })
+    if (error) alert('Error: ' + error.message)
+    else {
+      setNuevoPago({ nombre_club: '', monto_pagado: '', fecha_pago: hoyChile(), notas: '' })
+      await cargarPagosClubs(mesReporte)
+      alert('✅ Pago registrado')
+    }
+    setGuardandoPago(false)
+  }
+
+  async function eliminarPago(id) {
+    if (!confirm('¿Eliminar este pago?')) return
+    await supabase.from('pagos_clubes').delete().eq('id', id)
+    await cargarPagosClubs(mesReporte)
+  }
+
+  function calcularHorasClubEnMes(club, mes) {
+    const [year, month] = mes.split('-').map(Number)
+    const diasEnMes = new Date(year, month, 0).getDate()
+    let count = 0
+    for (let d = 1; d <= diasEnMes; d++) {
+      const fecha = new Date(year, month - 1, d)
+      if (fecha.getDay() === club.dia_semana) count++
+    }
+    return count
+  }
+
   async function cargarTodasReservas() {
     setCargandoReservas(true)
     const { data } = await supabase
@@ -228,6 +281,8 @@ export default function AdminPanel() {
       .gte('fecha', inicio).lte('fecha', fin).order('fecha').order('hora')
     setReservasReporte(reservas || [])
     setBloqueosReporte(bloqueos || [])
+    await cargarPagosClubs(mesReporte)
+    await cargarClubesSemanales()
     setCargandoReporte(false)
   }
 
@@ -576,7 +631,104 @@ export default function AdminPanel() {
               </>
             )}
 
-            {reservasReporte.length === 0 && bloqueosReporte.length === 0 && !cargandoReporte && (
+            {/* Seccion clubes semanales */}
+            {clubesSemanales.length > 0 && (() => {
+              const nombresMes = new Date(mesReporte + '-01').toLocaleString('es-CL', { month: 'long', year: 'numeric' })
+              const clubsAgrupados = clubesSemanales.reduce((acc, b) => {
+                if (!acc[b.motivo]) acc[b.motivo] = []
+                acc[b.motivo].push(b)
+                return acc
+              }, {})
+
+              return (
+                <div style={{ marginTop: '1.5rem' }}>
+                  <h3 style={{ fontFamily: 'Bebas Neue, sans-serif', fontSize: '1.2rem', color: 'var(--verde-oscuro)', marginBottom: '0.8rem', letterSpacing: '0.05em' }}>
+                    Clubes Semanales — {nombresMes}
+                  </h3>
+                  <div style={{ overflowX: 'auto', marginBottom: '1rem' }}>
+                    <table className="tabla">
+                      <thead><tr><th>Club</th><th>Días/semana</th><th>Usos en el mes</th><th>Horas totales</th><th>Monto total</th><th>Estado pago</th></tr></thead>
+                      <tbody>
+                        {Object.entries(clubsAgrupados).map(([nombre, dias]) => {
+                          const diasUnicos = [...new Set(dias.map(d => d.dia_semana))]
+                          const horasPorUso = dias.reduce((s, d) => s + 1, 0) / diasUnicos.length
+                          const usosEnMes = diasUnicos.reduce((s, dia) => {
+                            const mockClub = { dia_semana: dia }
+                            return s + calcularHorasClubEnMes(mockClub, mesReporte)
+                          }, 0)
+                          const horasTotales = usosEnMes * (dias.length / diasUnicos.length)
+                          const precioPorHora = dias[0].monto > 0 ? dias[0].monto : 10000
+                          const montoTotal = dias[0].tipo === 'pagado' ? horasTotales * precioPorHora : 0
+                          const pagoRegistrado = pagosClubs.find(p => p.nombre_club === nombre)
+
+                          return (
+                            <tr key={nombre}>
+                              <td><strong>{nombre}</strong></td>
+                              <td>{diasUnicos.map(d => DIAS[d]).join(', ')}</td>
+                              <td>{usosEnMes} veces</td>
+                              <td>{horasTotales} hrs</td>
+                              <td>{montoTotal > 0 ? `$${montoTotal.toLocaleString('es-CL')}` : 'Gratuito'}</td>
+                              <td>
+                                {montoTotal === 0 ? (
+                                  <span className="badge badge-amarillo">Convenio</span>
+                                ) : pagoRegistrado ? (
+                                  <span className="badge badge-verde">✓ Pagado {pagoRegistrado.fecha_pago.split('-').reverse().join('/')}</span>
+                                ) : (
+                                  <span className="badge badge-rojo">⏳ Pendiente</span>
+                                )}
+                              </td>
+                            </tr>
+                          )
+                        })}
+                      </tbody>
+                    </table>
+                  </div>
+
+                  {/* Registrar pago */}
+                  <div style={{ background: '#f0fdf4', border: '1.5px solid #bbf7d0', borderRadius: '10px', padding: '1.2rem' }}>
+                    <div style={{ fontFamily: 'Bebas Neue, sans-serif', fontSize: '1rem', color: 'var(--verde-oscuro)', letterSpacing: '0.05em', marginBottom: '1rem' }}>💰 Registrar Pago de Club</div>
+                    <div style={{ display: 'flex', gap: '10px', flexWrap: 'wrap', alignItems: 'flex-end' }}>
+                      <div>
+                        <label className="form-label">Club</label>
+                        <select className="form-input" style={{ minWidth: '180px' }} value={nuevoPago.nombre_club} onChange={e => setNuevoPago(p => ({ ...p, nombre_club: e.target.value }))}>
+                          <option value="">Seleccionar...</option>
+                          {Object.keys(clubsAgrupados).map(n => <option key={n} value={n}>{n}</option>)}
+                        </select>
+                      </div>
+                      <div>
+                        <label className="form-label">Monto pagado ($)</label>
+                        <input className="form-input" type="number" placeholder="Ej: 80000" style={{ width: '140px' }} value={nuevoPago.monto_pagado} onChange={e => setNuevoPago(p => ({ ...p, monto_pagado: e.target.value }))} />
+                      </div>
+                      <div>
+                        <label className="form-label">Fecha de pago</label>
+                        <input className="form-input" type="date" style={{ width: '150px' }} value={nuevoPago.fecha_pago} onChange={e => setNuevoPago(p => ({ ...p, fecha_pago: e.target.value }))} />
+                      </div>
+                      <div>
+                        <label className="form-label">Notas (opcional)</label>
+                        <input className="form-input" placeholder="Ej: Pagó con transferencia" style={{ width: '200px' }} value={nuevoPago.notas} onChange={e => setNuevoPago(p => ({ ...p, notas: e.target.value }))} />
+                      </div>
+                      <button className="btn-verde" style={{ width: 'auto', padding: '10px 20px' }} onClick={registrarPago} disabled={guardandoPago}>
+                        {guardandoPago ? 'Guardando...' : '✓ Registrar pago'}
+                      </button>
+                    </div>
+
+                    {pagosClubs.length > 0 && (
+                      <div style={{ marginTop: '1rem' }}>
+                        <div style={{ fontSize: '0.85rem', fontWeight: 600, color: 'var(--verde-oscuro)', marginBottom: '6px' }}>Pagos registrados este mes:</div>
+                        {pagosClubs.map(p => (
+                          <div key={p.id} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '6px 0', borderBottom: '1px solid #dcfce7', fontSize: '0.85rem' }}>
+                            <span><strong>{p.nombre_club}</strong> — ${p.monto_pagado.toLocaleString('es-CL')} — {p.fecha_pago.split('-').reverse().join('/')}{p.notas ? ` — ${p.notas}` : ''}</span>
+                            <button onClick={() => eliminarPago(p.id)} style={{ color: 'var(--rojo)', background: 'none', border: 'none', cursor: 'pointer', fontSize: '0.82rem' }}>✕</button>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                </div>
+              )
+            })()}
+
+            {reservasReporte.length === 0 && bloqueosReporte.length === 0 && clubesSemanales.length === 0 && !cargandoReporte && (
               <p style={{ color: 'var(--gris)', textAlign: 'center', padding: '2rem 0' }}>Selecciona un mes y presiona "Cargar"</p>
             )}
           </div>
