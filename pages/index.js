@@ -21,6 +21,13 @@ function ahoraChileHour() {
   return chile.getHours()
 }
 
+function maxFechaChile() {
+  const now = new Date()
+  const chile = new Date(now.toLocaleString('en-US', { timeZone: 'America/Santiago' }))
+  chile.setDate(chile.getDate() + 14)
+  return chile.toISOString().split('T')[0]
+}
+
 export default function Home() {
   const [fecha, setFecha] = useState(hoyChile())
   const [horasOcupadas, setHorasOcupadas] = useState([])
@@ -55,8 +62,20 @@ export default function Home() {
       .select('hora')
       .eq('fecha', fecha)
 
+    // Bloqueos semanales (clubes)
+    const fechaObj = new Date(fecha + 'T12:00:00')
+    const diaSemana = fechaObj.getDay() // 0=domingo, 1=lunes...
+    const { data: semanales } = await supabase
+      .from('bloqueos_semanales')
+      .select('hora_inicio')
+      .eq('dia_semana', diaSemana)
+      .eq('activo', true)
+
+    const horasBloqSemanales = semanales ? semanales.map(s => s.hora_inicio) : []
+    const horasBloqFecha = bloqueos ? bloqueos.map(b => b.hora) : []
+
     setHorasOcupadas(reservas ? reservas.map(r => r.hora) : [])
-    setHorasBloqueadas(bloqueos ? bloqueos.map(b => b.hora) : [])
+    setHorasBloqueadas([...new Set([...horasBloqFecha, ...horasBloqSemanales])])
     setLoading(false)
   }
 
@@ -218,8 +237,12 @@ export default function Home() {
             className="fecha-input"
             value={fecha}
             min={hoyChile()}
+            max={maxFechaChile()}
             onChange={e => setFecha(e.target.value)}
           />
+          <p style={{ marginTop: '8px', fontSize: '0.82rem', color: 'var(--gris)' }}>
+            Solo puedes reservar con hasta <strong>2 semanas</strong> de anticipación. Para fechas más lejanas, contáctate con la directiva de la Junta de Vecinos.
+          </p>
         </div>
 
         {/* Grid de horas */}

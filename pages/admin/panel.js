@@ -4,6 +4,7 @@ import { supabase } from '../../lib/supabase'
 import Head from 'next/head'
 
 const HORAS = Array.from({ length: 15 }, (_, i) => i + 9)
+const DIAS = { 0: 'Domingo', 1: 'Lunes', 2: 'Martes', 3: 'Miércoles', 4: 'Jueves', 5: 'Viernes', 6: 'Sábado' }
 
 function formatHora(h) {
   return `${h.toString().padStart(2, '0')}:00`
@@ -36,6 +37,11 @@ export default function AdminPanel() {
   const [bloqueosMensuales, setBloqueosMensuales] = useState([])
   const [desbloqueoTemp, setDesbloqueoTemp] = useState({})
 
+  // Clubes semanales
+  const [clubes, setClubes] = useState([])
+  const [nuevoClub, setNuevoClub] = useState({ motivo: '', dia: 1, hora_inicio: 9, hora_fin: 10, tipo: 'gratuito', monto: '' })
+  const [guardandoClub, setGuardandoClub] = useState(false)
+
   // Reporte
   const [mesReporte, setMesReporte] = useState(new Date().toISOString().slice(0, 7))
   const [reservasReporte, setReservasReporte] = useState([])
@@ -60,6 +66,7 @@ export default function AdminPanel() {
 
   useEffect(() => {
     if (tab === 'bloqueos') { cargarHorasBloqueo(); cargarBloqueosMensuales() }
+    if (tab === 'clubes') cargarClubes()
     if (tab === 'reservas') cargarTodasReservas()
   }, [tab, fechaBloqueo])
 
@@ -77,6 +84,51 @@ export default function AdminPanel() {
     const { data } = await supabase
       .from('bloqueos').select('*').eq('indefinido', true).order('hora')
     setBloqueosMensuales(data || [])
+  }
+
+  async function cargarClubes() {
+    const { data } = await supabase.from('bloqueos_semanales').select('*').order('dia_semana').order('hora_inicio')
+    setClubes(data || [])
+  }
+
+  async function agregarClub() {
+    if (!nuevoClub.motivo.trim()) return alert('Escribe el nombre del club')
+    if (nuevoClub.hora_fin <= nuevoClub.hora_inicio) return alert('La hora de término debe ser mayor a la de inicio')
+    if (nuevoClub.tipo === 'pagado' && !nuevoClub.monto) return alert('Escribe el monto')
+    setGuardandoClub(true)
+
+    const horas = []
+    for (let h = nuevoClub.hora_inicio; h < nuevoClub.hora_fin; h++) {
+      horas.push({
+        dia_semana: parseInt(nuevoClub.dia),
+        hora_inicio: h,
+        hora_fin: h + 1,
+        motivo: nuevoClub.motivo.trim(),
+        tipo: nuevoClub.tipo,
+        monto: nuevoClub.tipo === 'pagado' ? parseInt(nuevoClub.monto) : 0,
+        activo: true
+      })
+    }
+
+    const { error } = await supabase.from('bloqueos_semanales').insert(horas)
+    if (error) alert('Error: ' + error.message)
+    else {
+      setNuevoClub({ motivo: '', dia: 1, hora_inicio: 9, hora_fin: 10, tipo: 'gratuito', monto: '' })
+      await cargarClubes()
+      alert('✅ Club agregado correctamente')
+    }
+    setGuardandoClub(false)
+  }
+
+  async function eliminarClub(motivo, dia) {
+    if (!confirm(`¿Eliminar todos los horarios de "${motivo}" del ${DIAS[dia]}?`)) return
+    await supabase.from('bloqueos_semanales').delete().eq('motivo', motivo).eq('dia_semana', dia)
+    await cargarClubes()
+  }
+
+  async function toggleClub(id, activo) {
+    await supabase.from('bloqueos_semanales').update({ activo: !activo }).eq('id', id)
+    await cargarClubes()
   }
 
   async function cargarTodasReservas() {
@@ -243,7 +295,7 @@ export default function AdminPanel() {
         <div className="admin-nav" style={{ marginBottom: '1.5rem' }}>
           {[
             { id: 'bloqueos', label: '🔒 Bloquear Horas' },
-            { id: 'mensuales', label: '📅 Clubes Mensuales' },
+            { id: 'clubes', label: '🏃 Clubes Semanales' },
             { id: 'reporte', label: '📊 Reporte Mensual' },
             { id: 'reservas', label: '📋 Ver Reservas' },
             { id: 'cuenta', label: '⚙️ Mi Cuenta' }
@@ -360,56 +412,102 @@ export default function AdminPanel() {
           </>
         )}
 
-        {/* TAB CLUBES MENSUALES */}
-        {tab === 'mensuales' && (
-          <div className="card">
-            <div className="seccion-titulo">📅 Clubes y Bloqueos Indefinidos</div>
-            <p style={{ color: 'var(--gris)', fontSize: '0.88rem', marginBottom: '1.2rem' }}>
-              Aquí puedes ver las horas bloqueadas permanentemente para clubes. Puedes eliminar el bloqueo completo o desbloquearlo solo para un día específico.
-            </p>
+        {/* TAB CLUBES SEMANALES */}
+        {tab === 'clubes' && (
+          <>
+            <div className="card">
+              <div className="seccion-titulo">➕ Agregar Club</div>
+              <p style={{ color: 'var(--gris)', fontSize: '0.88rem', marginBottom: '1.2rem' }}>
+                Crea un club con su horario semanal permanente. Las horas quedarán bloqueadas automáticamente cada semana.
+              </p>
 
-            {bloqueosMensuales.length === 0 ? (
-              <p style={{ color: 'var(--gris)', textAlign: 'center', padding: '2rem 0' }}>No hay bloqueos indefinidos. Créalos desde "Bloquear Horas" → "Indefinido".</p>
-            ) : (
-              <div style={{ overflowX: 'auto' }}>
-                <table className="tabla">
-                  <thead><tr><th>Hora</th><th>Motivo</th><th>Tipo</th><th>Desbloquear un día</th><th>Eliminar bloqueo</th></tr></thead>
-                  <tbody>
-                    {bloqueosMensuales.map(b => (
-                      <tr key={b.id}>
-                        <td><strong>{formatHora(b.hora)}</strong></td>
-                        <td>{b.motivo}</td>
-                        <td><span className={`badge ${b.tipo === 'pagado' ? 'badge-verde' : 'badge-amarillo'}`}>{b.tipo === 'pagado' ? 'Pagado' : 'Gratuito'}</span></td>
-                        <td>
-                          <div style={{ display: 'flex', gap: '8px', alignItems: 'center', flexWrap: 'wrap' }}>
-                            <input
-                              type="date"
-                              className="fecha-input"
-                              style={{ fontSize: '0.82rem', padding: '6px 10px', maxWidth: '160px' }}
-                              value={desbloqueoTemp[b.id] || ''}
-                              min={hoyChile()}
-                              onChange={e => setDesbloqueoTemp(prev => ({ ...prev, [b.id]: e.target.value }))}
-                            />
-                            <button
-                              onClick={() => desbloquearPorDia(b.id, b.hora)}
-                              style={{ padding: '6px 12px', background: 'var(--amarillo)', color: 'white', border: 'none', borderRadius: '6px', cursor: 'pointer', fontSize: '0.82rem', fontWeight: 600, fontFamily: 'DM Sans, sans-serif' }}
-                            >
-                              Desbloquear
-                            </button>
-                          </div>
-                        </td>
-                        <td>
-                          <button onClick={() => eliminarBloqueo(b.id)} style={{ color: 'var(--rojo)', background: 'none', border: 'none', cursor: 'pointer', fontSize: '0.88rem', fontWeight: 600 }}>
-                            Eliminar todo
-                          </button>
-                        </td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(200px, 1fr))', gap: '1rem', marginBottom: '1rem' }}>
+                <div className="form-grupo" style={{ marginBottom: 0 }}>
+                  <label className="form-label">Nombre del club</label>
+                  <input className="form-input" placeholder="Ej: Voleibol Tercer Tiempo" value={nuevoClub.motivo} onChange={e => setNuevoClub(p => ({ ...p, motivo: e.target.value }))} />
+                </div>
+                <div className="form-grupo" style={{ marginBottom: 0 }}>
+                  <label className="form-label">Día de la semana</label>
+                  <select className="form-input" value={nuevoClub.dia} onChange={e => setNuevoClub(p => ({ ...p, dia: e.target.value }))}>
+                    {Object.entries(DIAS).map(([val, nombre]) => <option key={val} value={val}>{nombre}</option>)}
+                  </select>
+                </div>
+                <div className="form-grupo" style={{ marginBottom: 0 }}>
+                  <label className="form-label">Hora inicio</label>
+                  <select className="form-input" value={nuevoClub.hora_inicio} onChange={e => setNuevoClub(p => ({ ...p, hora_inicio: parseInt(e.target.value) }))}>
+                    {HORAS.map(h => <option key={h} value={h}>{formatHora(h)}</option>)}
+                  </select>
+                </div>
+                <div className="form-grupo" style={{ marginBottom: 0 }}>
+                  <label className="form-label">Hora término</label>
+                  <select className="form-input" value={nuevoClub.hora_fin} onChange={e => setNuevoClub(p => ({ ...p, hora_fin: parseInt(e.target.value) }))}>
+                    {HORAS.filter(h => h > nuevoClub.hora_inicio).concat([23]).map(h => <option key={h} value={h}>{formatHora(h)}</option>)}
+                  </select>
+                </div>
               </div>
-            )}
-          </div>
+
+              <div className="form-grupo">
+                <label className="form-label">Tipo de pago</label>
+                <div style={{ display: 'flex', gap: '10px' }}>
+                  {[{ val: 'gratuito', label: '🆓 Gratuito / Convenio' }, { val: 'pagado', label: '💰 Pagado' }].map(opt => (
+                    <button key={opt.val} onClick={() => setNuevoClub(p => ({ ...p, tipo: opt.val }))} style={{ padding: '10px 16px', borderRadius: '8px', border: '2px solid', borderColor: nuevoClub.tipo === opt.val ? 'var(--verde)' : '#e5e7eb', background: nuevoClub.tipo === opt.val ? 'var(--verde)' : 'white', color: nuevoClub.tipo === opt.val ? 'white' : 'var(--gris-oscuro)', cursor: 'pointer', fontFamily: 'DM Sans, sans-serif', fontSize: '0.88rem', fontWeight: 500 }}>{opt.label}</button>
+                  ))}
+                </div>
+              </div>
+
+              {nuevoClub.tipo === 'pagado' && (
+                <div className="form-grupo">
+                  <label className="form-label">Monto por hora ($)</label>
+                  <input className="form-input" type="number" placeholder="Ej: 10000" value={nuevoClub.monto} onChange={e => setNuevoClub(p => ({ ...p, monto: e.target.value }))} />
+                </div>
+              )}
+
+              <button className="btn-verde" onClick={agregarClub} disabled={guardandoClub}>
+                {guardandoClub ? 'Guardando...' : `➕ Agregar club — Todos los ${DIAS[nuevoClub.dia]} de ${formatHora(nuevoClub.hora_inicio)} a ${formatHora(nuevoClub.hora_fin)}`}
+              </button>
+            </div>
+
+            <div className="card">
+              <div className="seccion-titulo">📋 Clubes Registrados</div>
+              {clubes.length === 0 ? (
+                <p style={{ color: 'var(--gris)', textAlign: 'center', padding: '2rem 0' }}>No hay clubes registrados aún.</p>
+              ) : (
+                <div style={{ overflowX: 'auto' }}>
+                  <table className="tabla">
+                    <thead><tr><th>Club</th><th>Día</th><th>Horario</th><th>Tipo</th><th>Estado</th><th>Eliminar</th></tr></thead>
+                    <tbody>
+                      {Object.entries(
+                        clubes.reduce((acc, b) => {
+                          const key = `${b.motivo}__${b.dia_semana}`
+                          if (!acc[key]) acc[key] = { ...b, horas: [] }
+                          acc[key].horas.push(b.hora_inicio)
+                          return acc
+                        }, {})
+                      ).map(([key, club]) => (
+                        <tr key={key}>
+                          <td><strong>{club.motivo}</strong></td>
+                          <td>{DIAS[club.dia_semana]}</td>
+                          <td>{formatHora(Math.min(...club.horas))} — {formatHora(Math.max(...club.horas) + 1)}</td>
+                          <td><span className={`badge ${club.tipo === 'pagado' ? 'badge-verde' : 'badge-amarillo'}`}>{club.tipo === 'pagado' ? 'Pagado' : 'Gratuito'}</span></td>
+                          <td>
+                            <button onClick={() => club.horas.forEach(h => { const b = clubes.find(x => x.motivo === club.motivo && x.dia_semana === club.dia_semana && x.hora_inicio === h); if(b) toggleClub(b.id, b.activo) })}
+                              style={{ padding: '4px 12px', borderRadius: '6px', border: 'none', background: club.activo ? '#dcfce7' : '#f3f4f6', color: club.activo ? '#15803d' : '#6b7280', cursor: 'pointer', fontWeight: 600, fontSize: '0.82rem', fontFamily: 'DM Sans, sans-serif' }}>
+                              {club.activo ? '✓ Activo' : '⏸ Pausado'}
+                            </button>
+                          </td>
+                          <td>
+                            <button onClick={() => eliminarClub(club.motivo, club.dia_semana)} style={{ color: 'var(--rojo)', background: 'none', border: 'none', cursor: 'pointer', fontSize: '0.88rem', fontWeight: 600 }}>
+                              🗑 Eliminar
+                            </button>
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+            </div>
+          </>
         )}
 
         {/* TAB REPORTE */}
