@@ -27,7 +27,6 @@ export default function AdminPanel() {
   const [motivoBloqueo, setMotivoBloqueo] = useState('')
   const [tipoBloqueo, setTipoBloqueo] = useState('gratuito')
   const [montoBloqueo, setMontoBloqueo] = useState('')
-  const [esIndefinido, setEsIndefinido] = useState(false)
   const [horasOcupadas, setHorasOcupadas] = useState([])
   const [horasBloqueadas, setHorasBloqueadas] = useState([])
   const [bloqueoActual, setBloqueoActual] = useState([])
@@ -39,7 +38,8 @@ export default function AdminPanel() {
 
   // Clubes semanales
   const [clubes, setClubes] = useState([])
-  const [nuevoClub, setNuevoClub] = useState({ motivo: '', dia: 1, hora_inicio: 9, hora_fin: 10, tipo: 'gratuito', monto: '' })
+  const [nuevoClub, setNuevoClub] = useState({ motivo: '', tipo: 'gratuito', monto: '' })
+  const [diasClub, setDiasClub] = useState([{ dia: 1, hora_inicio: 9, hora_fin: 10 }])
   const [guardandoClub, setGuardandoClub] = useState(false)
 
   // Reporte
@@ -93,27 +93,32 @@ export default function AdminPanel() {
 
   async function agregarClub() {
     if (!nuevoClub.motivo.trim()) return alert('Escribe el nombre del club')
-    if (nuevoClub.hora_fin <= nuevoClub.hora_inicio) return alert('La hora de término debe ser mayor a la de inicio')
     if (nuevoClub.tipo === 'pagado' && !nuevoClub.monto) return alert('Escribe el monto')
+    for (const d of diasClub) {
+      if (d.hora_fin <= d.hora_inicio) return alert('La hora de término debe ser mayor a la de inicio en todos los días')
+    }
     setGuardandoClub(true)
 
     const horas = []
-    for (let h = nuevoClub.hora_inicio; h < nuevoClub.hora_fin; h++) {
-      horas.push({
-        dia_semana: parseInt(nuevoClub.dia),
-        hora_inicio: h,
-        hora_fin: h + 1,
-        motivo: nuevoClub.motivo.trim(),
-        tipo: nuevoClub.tipo,
-        monto: nuevoClub.tipo === 'pagado' ? parseInt(nuevoClub.monto) : 0,
-        activo: true
-      })
+    for (const d of diasClub) {
+      for (let h = d.hora_inicio; h < d.hora_fin; h++) {
+        horas.push({
+          dia_semana: parseInt(d.dia),
+          hora_inicio: h,
+          hora_fin: h + 1,
+          motivo: nuevoClub.motivo.trim(),
+          tipo: nuevoClub.tipo,
+          monto: nuevoClub.tipo === 'pagado' ? parseInt(nuevoClub.monto) : 0,
+          activo: true
+        })
+      }
     }
 
     const { error } = await supabase.from('bloqueos_semanales').insert(horas)
     if (error) alert('Error: ' + error.message)
     else {
-      setNuevoClub({ motivo: '', dia: 1, hora_inicio: 9, hora_fin: 10, tipo: 'gratuito', monto: '' })
+      setNuevoClub({ motivo: '', tipo: 'gratuito', monto: '' })
+      setDiasClub([{ dia: 1, hora_inicio: 9, hora_fin: 10 }])
       await cargarClubes()
       alert('✅ Club agregado correctamente')
     }
@@ -149,34 +154,18 @@ export default function AdminPanel() {
     if (tipoBloqueo === 'pagado' && !montoBloqueo) return alert('Escribe el monto')
     setGuardandoBloqueo(true)
 
-    if (esIndefinido) {
-      // Bloqueo indefinido: una fila por hora sin fecha específica, usamos fecha '2000-01-01' como placeholder
-      const bloqueos = horasSelBloqueo.map(hora => ({
-        fecha: '2000-01-01',
-        hora,
-        motivo: motivoBloqueo.trim(),
-        tipo: tipoBloqueo,
-        monto: tipoBloqueo === 'pagado' ? parseInt(montoBloqueo) : 0,
-        bloqueado_por: admin.email,
-        indefinido: true
-      }))
-      const { error } = await supabase.from('bloqueos').insert(bloqueos)
-      if (error) alert('Error: ' + error.message)
-      else { alert('✅ Horas bloqueadas indefinidamente'); await cargarBloqueosMensuales() }
-    } else {
-      const bloqueos = horasSelBloqueo.map(hora => ({
-        fecha: fechaBloqueo,
-        hora,
-        motivo: motivoBloqueo.trim(),
-        tipo: tipoBloqueo,
-        monto: tipoBloqueo === 'pagado' ? parseInt(montoBloqueo) : 0,
-        bloqueado_por: admin.email,
-        indefinido: false
-      }))
-      const { error } = await supabase.from('bloqueos').insert(bloqueos)
-      if (error) alert('Error: ' + error.message)
-      else { alert('✅ Horas bloqueadas'); await cargarHorasBloqueo() }
-    }
+    const bloqueos = horasSelBloqueo.map(hora => ({
+      fecha: fechaBloqueo,
+      hora,
+      motivo: motivoBloqueo.trim(),
+      tipo: tipoBloqueo,
+      monto: tipoBloqueo === 'pagado' ? parseInt(montoBloqueo) : 0,
+      bloqueado_por: admin.email,
+      indefinido: false
+    }))
+    const { error } = await supabase.from('bloqueos').insert(bloqueos)
+    if (error) alert('Error: ' + error.message)
+    else { alert('✅ Horas bloqueadas'); await cargarHorasBloqueo() }
 
     setHorasSelBloqueo([])
     setMotivoBloqueo('')
@@ -310,33 +299,10 @@ export default function AdminPanel() {
             <div className="card">
               <div className="seccion-titulo">🔒 Bloquear Horas</div>
 
-              <div style={{ display: 'flex', gap: '12px', marginBottom: '1.2rem', flexWrap: 'wrap' }}>
-                <button
-                  onClick={() => setEsIndefinido(false)}
-                  style={{ padding: '10px 18px', borderRadius: '8px', border: '2px solid', borderColor: !esIndefinido ? 'var(--verde)' : '#e5e7eb', background: !esIndefinido ? 'var(--verde)' : 'white', color: !esIndefinido ? 'white' : 'var(--gris-oscuro)', cursor: 'pointer', fontFamily: 'DM Sans, sans-serif', fontWeight: 500, fontSize: '0.88rem' }}
-                >
-                  📅 Fecha específica
-                </button>
-                <button
-                  onClick={() => setEsIndefinido(true)}
-                  style={{ padding: '10px 18px', borderRadius: '8px', border: '2px solid', borderColor: esIndefinido ? 'var(--verde)' : '#e5e7eb', background: esIndefinido ? 'var(--verde)' : 'white', color: esIndefinido ? 'white' : 'var(--gris-oscuro)', cursor: 'pointer', fontFamily: 'DM Sans, sans-serif', fontWeight: 500, fontSize: '0.88rem' }}
-                >
-                  ♾️ Indefinido (club mensual)
-                </button>
+              <div className="form-grupo">
+                <label className="form-label">Fecha</label>
+                <input type="date" className="fecha-input" value={fechaBloqueo} onChange={e => setFechaBloqueo(e.target.value)} />
               </div>
-
-              {!esIndefinido && (
-                <div className="form-grupo">
-                  <label className="form-label">Fecha</label>
-                  <input type="date" className="fecha-input" value={fechaBloqueo} onChange={e => setFechaBloqueo(e.target.value)} />
-                </div>
-              )}
-
-              {esIndefinido && (
-                <div style={{ background: '#fef9c3', border: '1.5px solid #fde68a', borderRadius: '8px', padding: '10px 14px', marginBottom: '1rem', fontSize: '0.85rem', color: '#92400e' }}>
-                  ⚠️ El bloqueo indefinido bloqueará esa hora <strong>todos los días</strong>. Puedes desbloquearla temporalmente desde la pestaña "Clubes Mensuales".
-                </div>
-              )}
 
               <div className="form-grupo">
                 <label className="form-label">Selecciona las horas</label>
@@ -384,7 +350,7 @@ export default function AdminPanel() {
               )}
 
               <button className="btn-verde" onClick={guardarBloqueos} disabled={guardandoBloqueo || horasSelBloqueo.length === 0}>
-                {guardandoBloqueo ? 'Guardando...' : `🔒 Bloquear ${horasSelBloqueo.length} hora(s)${esIndefinido ? ' indefinidamente' : ''}`}
+                {guardandoBloqueo ? 'Guardando...' : `🔒 Bloquear ${horasSelBloqueo.length} hora(s) seleccionada(s)`}
               </button>
             </div>
 
@@ -421,29 +387,33 @@ export default function AdminPanel() {
                 Crea un club con su horario semanal permanente. Las horas quedarán bloqueadas automáticamente cada semana.
               </p>
 
-              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(200px, 1fr))', gap: '1rem', marginBottom: '1rem' }}>
-                <div className="form-grupo" style={{ marginBottom: 0 }}>
-                  <label className="form-label">Nombre del club</label>
-                  <input className="form-input" placeholder="Ej: Voleibol Tercer Tiempo" value={nuevoClub.motivo} onChange={e => setNuevoClub(p => ({ ...p, motivo: e.target.value }))} />
-                </div>
-                <div className="form-grupo" style={{ marginBottom: 0 }}>
-                  <label className="form-label">Día de la semana</label>
-                  <select className="form-input" value={nuevoClub.dia} onChange={e => setNuevoClub(p => ({ ...p, dia: e.target.value }))}>
-                    {Object.entries(DIAS).map(([val, nombre]) => <option key={val} value={val}>{nombre}</option>)}
-                  </select>
-                </div>
-                <div className="form-grupo" style={{ marginBottom: 0 }}>
-                  <label className="form-label">Hora inicio</label>
-                  <select className="form-input" value={nuevoClub.hora_inicio} onChange={e => setNuevoClub(p => ({ ...p, hora_inicio: parseInt(e.target.value) }))}>
-                    {HORAS.map(h => <option key={h} value={h}>{formatHora(h)}</option>)}
-                  </select>
-                </div>
-                <div className="form-grupo" style={{ marginBottom: 0 }}>
-                  <label className="form-label">Hora término</label>
-                  <select className="form-input" value={nuevoClub.hora_fin} onChange={e => setNuevoClub(p => ({ ...p, hora_fin: parseInt(e.target.value) }))}>
-                    {HORAS.filter(h => h > nuevoClub.hora_inicio).concat([23]).map(h => <option key={h} value={h}>{formatHora(h)}</option>)}
-                  </select>
-                </div>
+              <div className="form-grupo">
+                <label className="form-label">Nombre del club</label>
+                <input className="form-input" placeholder="Ej: Voleibol Tercer Tiempo" value={nuevoClub.motivo} onChange={e => setNuevoClub(p => ({ ...p, motivo: e.target.value }))} />
+              </div>
+
+              <div className="form-grupo">
+                <label className="form-label">Días y horarios</label>
+                {diasClub.map((d, i) => (
+                  <div key={i} style={{ display: 'flex', gap: '8px', alignItems: 'center', marginBottom: '8px', flexWrap: 'wrap' }}>
+                    <select className="form-input" style={{ flex: '1', minWidth: '120px' }} value={d.dia} onChange={e => setDiasClub(prev => prev.map((x, j) => j === i ? { ...x, dia: parseInt(e.target.value) } : x))}>
+                      {Object.entries(DIAS).map(([val, nombre]) => <option key={val} value={val}>{nombre}</option>)}
+                    </select>
+                    <select className="form-input" style={{ flex: '1', minWidth: '100px' }} value={d.hora_inicio} onChange={e => setDiasClub(prev => prev.map((x, j) => j === i ? { ...x, hora_inicio: parseInt(e.target.value) } : x))}>
+                      {HORAS.map(h => <option key={h} value={h}>{formatHora(h)}</option>)}
+                    </select>
+                    <span style={{ color: 'var(--gris)' }}>a</span>
+                    <select className="form-input" style={{ flex: '1', minWidth: '100px' }} value={d.hora_fin} onChange={e => setDiasClub(prev => prev.map((x, j) => j === i ? { ...x, hora_fin: parseInt(e.target.value) } : x))}>
+                      {HORAS.filter(h => h > d.hora_inicio).concat([23]).map(h => <option key={h} value={h}>{formatHora(h)}</option>)}
+                    </select>
+                    {diasClub.length > 1 && (
+                      <button onClick={() => setDiasClub(prev => prev.filter((_, j) => j !== i))} style={{ color: 'var(--rojo)', background: 'none', border: 'none', cursor: 'pointer', fontSize: '1.2rem', padding: '0 4px' }}>✕</button>
+                    )}
+                  </div>
+                ))}
+                <button onClick={() => setDiasClub(prev => [...prev, { dia: 1, hora_inicio: 9, hora_fin: 10 }])} style={{ background: 'none', border: '1.5px dashed #d1d5db', borderRadius: '8px', padding: '8px 16px', color: 'var(--verde-oscuro)', cursor: 'pointer', fontFamily: 'DM Sans, sans-serif', fontSize: '0.88rem', fontWeight: 600, marginTop: '4px' }}>
+                  + Agregar otro día
+                </button>
               </div>
 
               <div className="form-grupo">
@@ -463,7 +433,7 @@ export default function AdminPanel() {
               )}
 
               <button className="btn-verde" onClick={agregarClub} disabled={guardandoClub}>
-                {guardandoClub ? 'Guardando...' : `➕ Agregar club — Todos los ${DIAS[nuevoClub.dia]} de ${formatHora(nuevoClub.hora_inicio)} a ${formatHora(nuevoClub.hora_fin)}`}
+                {guardandoClub ? 'Guardando...' : `➕ Agregar club — ${nuevoClub.motivo || 'sin nombre'} (${diasClub.length} día${diasClub.length > 1 ? 's' : ''})`}
               </button>
             </div>
 
