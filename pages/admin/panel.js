@@ -41,6 +41,7 @@ export default function AdminPanel() {
   const [nuevoClub, setNuevoClub] = useState({ motivo: '', tipo: 'gratuito', monto: '' })
   const [diasClub, setDiasClub] = useState([{ dia: 1, hora_inicio: 9, hora_fin: 10 }])
   const [guardandoClub, setGuardandoClub] = useState(false)
+  const [clubExpandido, setClubExpandido] = useState(null)
 
   // Reporte
   const [mesReporte, setMesReporte] = useState(new Date().toISOString().slice(0, 7))
@@ -446,38 +447,69 @@ export default function AdminPanel() {
               {clubes.length === 0 ? (
                 <p style={{ color: 'var(--gris)', textAlign: 'center', padding: '2rem 0' }}>No hay clubes registrados aún.</p>
               ) : (
-                <div style={{ overflowX: 'auto' }}>
-                  <table className="tabla">
-                    <thead><tr><th>Club</th><th>Día</th><th>Horario</th><th>Tipo</th><th>Estado</th><th>Eliminar</th></tr></thead>
-                    <tbody>
-                      {Object.entries(
-                        clubes.reduce((acc, b) => {
-                          const key = `${b.motivo}__${b.dia_semana}`
-                          if (!acc[key]) acc[key] = { ...b, horas: [] }
-                          acc[key].horas.push(b.hora_inicio)
-                          return acc
-                        }, {})
-                      ).map(([key, club]) => (
-                        <tr key={key}>
-                          <td><strong>{club.motivo}</strong></td>
-                          <td>{DIAS[club.dia_semana]}</td>
-                          <td>{formatHora(Math.min(...club.horas))} — {formatHora(Math.max(...club.horas) + 1)}</td>
-                          <td><span className={`badge ${club.tipo === 'pagado' ? 'badge-verde' : 'badge-amarillo'}`}>{club.tipo === 'pagado' ? 'Pagado' : 'Gratuito'}</span></td>
-                          <td>
-                            <button onClick={() => club.horas.forEach(h => { const b = clubes.find(x => x.motivo === club.motivo && x.dia_semana === club.dia_semana && x.hora_inicio === h); if(b) toggleClub(b.id, b.activo) })}
-                              style={{ padding: '4px 12px', borderRadius: '6px', border: 'none', background: club.activo ? '#dcfce7' : '#f3f4f6', color: club.activo ? '#15803d' : '#6b7280', cursor: 'pointer', fontWeight: 600, fontSize: '0.82rem', fontFamily: 'DM Sans, sans-serif' }}>
-                              {club.activo ? '✓ Activo' : '⏸ Pausado'}
-                            </button>
-                          </td>
-                          <td>
-                            <button onClick={() => eliminarClub(club.motivo, club.dia_semana)} style={{ color: 'var(--rojo)', background: 'none', border: 'none', cursor: 'pointer', fontSize: '0.88rem', fontWeight: 600 }}>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
+                  {Object.entries(
+                    clubes.reduce((acc, b) => {
+                      if (!acc[b.motivo]) acc[b.motivo] = []
+                      acc[b.motivo].push(b)
+                      return acc
+                    }, {})
+                  ).map(([nombre, dias]) => {
+                    const expandido = clubExpandido === nombre
+                    const todosActivos = dias.every(d => d.activo)
+                    return (
+                      <div key={nombre} style={{ border: '1.5px solid #e5e7eb', borderRadius: '10px', overflow: 'hidden' }}>
+                        <div
+                          onClick={() => setClubExpandido(expandido ? null : nombre)}
+                          style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '12px 16px', background: expandido ? '#f0fdf4' : 'white', cursor: 'pointer', gap: '12px' }}
+                        >
+                          <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+                            <span style={{ fontSize: '1.2rem' }}>{expandido ? '▼' : '▶'}</span>
+                            <strong style={{ fontSize: '0.95rem' }}>{nombre}</strong>
+                            <span style={{ fontSize: '0.78rem', color: 'var(--gris)', background: '#f3f4f6', padding: '2px 8px', borderRadius: '10px' }}>{dias.length} día{dias.length > 1 ? 's' : ''}</span>
+                          </div>
+                          <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
+                            <span className={`badge ${todosActivos ? 'badge-verde' : 'badge-gris'}`}>{todosActivos ? '✓ Activo' : '⏸ Pausado'}</span>
+                            <button
+                              onClick={e => { e.stopPropagation(); if(confirm(`¿Eliminar el club "${nombre}" y todos sus horarios?`)) { dias.forEach(d => supabase.from('bloqueos_semanales').delete().eq('id', d.id)); setTimeout(cargarClubes, 500) } }}
+                              style={{ color: 'var(--rojo)', background: 'none', border: 'none', cursor: 'pointer', fontSize: '0.88rem', fontWeight: 600, fontFamily: 'DM Sans, sans-serif' }}
+                            >
                               🗑 Eliminar
                             </button>
-                          </td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
+                          </div>
+                        </div>
+                        {expandido && (
+                          <div style={{ padding: '12px 16px', borderTop: '1px solid #e5e7eb', background: '#fafafa' }}>
+                            <table className="tabla" style={{ marginBottom: 0 }}>
+                              <thead><tr><th>Día</th><th>Horario</th><th>Tipo</th><th>Estado</th></tr></thead>
+                              <tbody>
+                                {Object.entries(dias.reduce((acc, b) => {
+                                  const key = b.dia_semana
+                                  if (!acc[key]) acc[key] = { ...b, horas: [] }
+                                  acc[key].horas.push(b.hora_inicio)
+                                  return acc
+                                }, {})).map(([dia, club]) => (
+                                  <tr key={dia}>
+                                    <td>{DIAS[club.dia_semana]}</td>
+                                    <td>{formatHora(Math.min(...club.horas))} — {formatHora(Math.max(...club.horas) + 1)}</td>
+                                    <td><span className={`badge ${club.tipo === 'pagado' ? 'badge-verde' : 'badge-amarillo'}`}>{club.tipo === 'pagado' ? 'Pagado' : 'Gratuito'}</span></td>
+                                    <td>
+                                      <button
+                                        onClick={() => club.horas.forEach(h => { const b2 = dias.find(x => x.dia_semana === parseInt(dia) && x.hora_inicio === h); if(b2) toggleClub(b2.id, b2.activo) })}
+                                        style={{ padding: '4px 12px', borderRadius: '6px', border: 'none', background: club.activo ? '#dcfce7' : '#f3f4f6', color: club.activo ? '#15803d' : '#6b7280', cursor: 'pointer', fontWeight: 600, fontSize: '0.82rem', fontFamily: 'DM Sans, sans-serif' }}
+                                      >
+                                        {club.activo ? '✓ Activo' : '⏸ Pausado'}
+                                      </button>
+                                    </td>
+                                  </tr>
+                                ))}
+                              </tbody>
+                            </table>
+                          </div>
+                        )}
+                      </div>
+                    )
+                  })}
                 </div>
               )}
             </div>
