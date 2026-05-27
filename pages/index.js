@@ -308,7 +308,7 @@ export default function Home() {
             value={fecha}
             min={hoyChile()}
             max={maxFechaChile()}
-            onChange={e => setFecha(e.target.value)}
+            onChange={e => { if (e.target.value <= maxFechaChile()) setFecha(e.target.value) }}
           />
           {/* Day pills row */}
           <div className="day-row">
