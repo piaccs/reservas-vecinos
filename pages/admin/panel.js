@@ -633,7 +633,7 @@ export default function AdminPanel() {
 
             {/* Seccion clubes semanales */}
             {clubesSemanales.length > 0 && (() => {
-              const nombresMes = new Date(mesReporte + '-01').toLocaleString('es-CL', { month: 'long', year: 'numeric' })
+              const [yr, mo] = mesReporte.split('-'); const nombresMes = new Date(parseInt(yr), parseInt(mo) - 1, 15).toLocaleString('es-CL', { month: 'long', year: 'numeric' })
               const clubsAgrupados = clubesSemanales.reduce((acc, b) => {
                 if (!acc[b.motivo]) acc[b.motivo] = []
                 acc[b.motivo].push(b)
