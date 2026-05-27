@@ -2,8 +2,11 @@ import { useState, useEffect } from 'react'
 import { supabase } from '../lib/supabase'
 import Head from 'next/head'
 import Link from 'next/link'
+import Icon from '../components/Icon'
 
 const HORAS = Array.from({ length: 15 }, (_, i) => i + 9) // 9 a 23
+const DIAS_CORTOS = ['DOM', 'LUN', 'MAR', 'MIÉ', 'JUE', 'VIE', 'SÁB']
+const MESES = ['enero', 'febrero', 'marzo', 'abril', 'mayo', 'junio', 'julio', 'agosto', 'septiembre', 'octubre', 'noviembre', 'diciembre']
 
 function formatHora(h) {
   return `${h.toString().padStart(2, '0')}:00`
@@ -28,6 +31,54 @@ function maxFechaChile() {
   return chile.toISOString().split('T')[0]
 }
 
+function fechaLarga(yyyymmdd) {
+  if (!yyyymmdd) return ''
+  const [y, m, d] = yyyymmdd.split('-').map(Number)
+  const obj = new Date(y, m - 1, d)
+  return `${DIAS_CORTOS[obj.getDay()].toLowerCase().replace('ié', 'ié')} ${d} de ${MESES[m - 1]}`
+}
+
+function dayLabel(yyyymmdd) {
+  const [y, m, d] = yyyymmdd.split('-').map(Number)
+  const obj = new Date(y, m - 1, d)
+  const dias = ['Domingo', 'Lunes', 'Martes', 'Miércoles', 'Jueves', 'Viernes', 'Sábado']
+  return `${dias[obj.getDay()]} ${d} de ${MESES[m - 1]}, ${y}`
+}
+
+// Genera lista de 7 días a partir de la fecha base, centrada
+function siguientesDias(centerYmd, count = 7) {
+  const [y, m, d] = centerYmd.split('-').map(Number)
+  const base = new Date(y, m - 1, d)
+  const today = new Date()
+  const maxDate = new Date(today)
+  maxDate.setDate(today.getDate() + 14)
+
+  const result = []
+  // Empezamos 1 día antes del seleccionado para mostrar contexto, pero nunca antes de hoy
+  for (let offset = -1; offset < count - 1; offset++) {
+    const dt = new Date(base)
+    dt.setDate(base.getDate() + offset)
+    if (dt < new Date(today.getFullYear(), today.getMonth(), today.getDate())) continue
+    if (dt > maxDate) break
+    result.push(dt)
+    if (result.length >= count) break
+  }
+  // Si faltan días por inicio, completa hacia adelante
+  while (result.length < count) {
+    const last = result[result.length - 1] || base
+    const dt = new Date(last)
+    dt.setDate(last.getDate() + 1)
+    if (dt > maxDate) break
+    result.push(dt)
+  }
+  return result.map(dt => {
+    const yy = dt.getFullYear()
+    const mm = String(dt.getMonth() + 1).padStart(2, '0')
+    const dd = String(dt.getDate()).padStart(2, '0')
+    return { ymd: `${yy}-${mm}-${dd}`, dia: DIAS_CORTOS[dt.getDay()], num: dt.getDate() }
+  })
+}
+
 export default function Home() {
   const [fecha, setFecha] = useState(hoyChile())
   const [horasOcupadas, setHorasOcupadas] = useState([])
@@ -40,12 +91,11 @@ export default function Home() {
 
   const [nombre, setNombre] = useState('')
   const [celular, setCelular] = useState('')
+  const [email, setEmail] = useState('')
   const [comprobante, setComprobante] = useState(null)
   const [errores, setErrores] = useState({})
 
-  useEffect(() => {
-    cargarHoras()
-  }, [fecha])
+  useEffect(() => { cargarHoras() }, [fecha])
 
   async function cargarHoras() {
     setLoading(true)
@@ -62,9 +112,8 @@ export default function Home() {
       .select('hora')
       .eq('fecha', fecha)
 
-    // Bloqueos semanales (clubes)
     const fechaObj = new Date(fecha + 'T12:00:00')
-    const diaSemana = fechaObj.getDay() // 0=domingo, 1=lunes...
+    const diaSemana = fechaObj.getDay()
     const { data: semanales } = await supabase
       .from('bloqueos_semanales')
       .select('hora_inicio')
@@ -82,8 +131,7 @@ export default function Home() {
   function getEstadoHora(hora) {
     const hoy = hoyChile()
     const ahoraH = ahoraChileHour()
-
-    if (fecha === hoy && hora <= ahoraH) return 'pasada'
+    if (fecha === hoy && hora <= ahoraH + 1) return 'pasada'
     if (horasOcupadas.includes(hora)) return 'ocupada'
     if (horasBloqueadas.includes(hora)) return 'bloqueada'
     return 'libre'
@@ -92,19 +140,12 @@ export default function Home() {
   function toggleHora(hora) {
     const estado = getEstadoHora(hora)
     if (estado !== 'libre') return
-
     setHorasSeleccionadas(prev => {
-      if (prev.includes(hora)) {
-        return prev.filter(h => h !== hora)
-      }
-      if (prev.length >= 2) {
-        return [hora]
-      }
+      if (prev.includes(hora)) return prev.filter(h => h !== hora)
+      if (prev.length >= 2) return [hora]
       if (prev.length === 1) {
         const diff = Math.abs(hora - prev[0])
-        if (diff === 1) {
-          return [...prev, hora].sort((a, b) => a - b)
-        }
+        if (diff === 1) return [...prev, hora].sort((a, b) => a - b)
         return [hora]
       }
       return [hora]
@@ -117,6 +158,7 @@ export default function Home() {
     setExito(false)
     setNombre('')
     setCelular('')
+    setEmail('')
     setComprobante(null)
     setErrores({})
   }
@@ -125,6 +167,7 @@ export default function Home() {
     const e = {}
     if (!nombre.trim()) e.nombre = 'Ingresa tu nombre'
     if (!celular.trim() || celular.replace(/\D/g, '').length < 9) e.celular = 'Ingresa un celular válido'
+    if (!email.trim() || !email.includes('@')) e.email = 'Ingresa un correo válido'
     if (!comprobante) e.comprobante = 'Debes subir el comprobante de transferencia'
     setErrores(e)
     return Object.keys(e).length === 0
@@ -133,51 +176,45 @@ export default function Home() {
   async function handleReservar() {
     if (!validar()) return
     setEnviando(true)
-
     try {
-      // Subir comprobante a Supabase Storage
       const ext = comprobante.name.split('.').pop()
       const nombreArchivo = `${fecha}_${horasSeleccionadas.join('-')}_${Date.now()}.${ext}`
       const { data: upload, error: uploadError } = await supabase.storage
         .from('comprobantes')
         .upload(nombreArchivo, comprobante)
-
       if (uploadError) throw uploadError
 
       const { data: urlData } = supabase.storage
         .from('comprobantes')
         .getPublicUrl(nombreArchivo)
-
       const comprobanteUrl = urlData.publicUrl
 
-      // Crear reservas
       const reservasData = horasSeleccionadas.map(hora => ({
-        fecha,
-        hora,
+        fecha, hora,
         nombre_reservante: nombre.trim(),
         celular: celular.trim(),
+        email_reservante: email.trim(),
         comprobante_url: comprobanteUrl,
         monto: 10000 * horasSeleccionadas.length,
         estado: 'confirmada'
       }))
 
-      const { error: reservaError } = await supabase
+      const { data: reservaInsertada, error: reservaError } = await supabase
         .from('reservas')
         .insert(reservasData)
-
+        .select('id')
       if (reservaError) throw reservaError
 
-      // Enviar correo
+      const reservaId = reservaInsertada?.[0]?.id
+
       await fetch('/api/enviar-correo', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          nombre,
-          celular,
-          fecha,
-          horas: horasSeleccionadas,
-          comprobanteUrl,
-          monto: 10000 * horasSeleccionadas.length
+          nombre, celular, email, fecha,
+          horas: horasSeleccionadas, comprobanteUrl,
+          monto: 10000 * horasSeleccionadas.length,
+          reservaId
         })
       })
 
@@ -192,6 +229,7 @@ export default function Home() {
   }
 
   const monto = horasSeleccionadas.length * 10000
+  const dias = siguientesDias(fecha, 7)
 
   return (
     <>
@@ -205,152 +243,289 @@ export default function Home() {
       <header className="header">
         <div className="header-logo">
           <div className="header-logo-box">
-            Junta Vecinos N°25 Collico
+            <span>JV</span>
+            <span className="logo-sub">N°25</span>
           </div>
           <div>
             <div className="header-titulo">Gimnasio Collico</div>
-            <div className="header-subtitulo">Junta de Vecinos N°25</div>
+            <div className="header-subtitulo">Junta de Vecinos N°25 · Valdivia</div>
           </div>
         </div>
         <Link href="/admin" className="btn-admin">
-          🔐 Admin
+          <Icon name="lock" size={13} />
+          Admin
         </Link>
       </header>
 
       <main className="main">
         {/* Hero */}
-        <div className="hero">
-          <h1>Reserva el Gimnasio</h1>
-          <p>Selecciona una fecha y elige el horario disponible. Puedes reservar 1 o 2 horas seguidas.</p>
+        <section className="hero">
+          <div className="kicker">Reserva tu hora — gimnasio</div>
+          <h1>
+            Un espacio <span className="hl">de todos</span><span className="accent">.</span>
+          </h1>
+          <p>
+            Reserva 1 o 2 horas seguidas en el gimnasio de la Junta de Vecinos N°25.
+            Hasta dos semanas de anticipación, confirmación por transferencia.
+          </p>
           <div className="hero-info">
-            <span className="hero-badge">📅 09:00 — 23:00 hrs</span>
-            <span className="hero-badge">💰 $10.000 por hora</span>
-            <span className="hero-badge">📍 Collico, Valdivia</span>
+            <div className="hero-cell">
+              <span className="hero-cell-icon"><Icon name="clock" size={16} /></span>
+              <div className="hero-cell-label">Horario</div>
+              <div className="hero-cell-value">09:00 – 23:00</div>
+            </div>
+            <div className="hero-cell">
+              <span className="hero-cell-icon"><Icon name="wallet" size={16} /></span>
+              <div className="hero-cell-label">Valor</div>
+              <div className="hero-cell-value">$10.000 / hr</div>
+            </div>
+            <div className="hero-cell">
+              <span className="hero-cell-icon"><Icon name="pin" size={16} /></span>
+              <div className="hero-cell-label">Lugar</div>
+              <div className="hero-cell-value">Collico, Valdivia</div>
+            </div>
+            <div className="hero-cell">
+              <span className="hero-cell-icon"><Icon name="users" size={16} /></span>
+              <div className="hero-cell-label">Aforo</div>
+              <div className="hero-cell-value">Un grupo</div>
+            </div>
           </div>
-        </div>
+        </section>
 
         {/* Selector fecha */}
-        <div className="fecha-section">
-          <div className="seccion-titulo">📅 Selecciona la fecha</div>
+        <div className="card fecha-section">
+          <div className="seccion-titulo">
+            <Icon name="calendar" size={17} />
+            Elige el día
+            <span className="pill-meta">
+              <Icon name="calendar" size={13} color="var(--verde-mid)" />
+              {fecha.split('-').reverse().join('/')}
+            </span>
+          </div>
           <input
             type="date"
             className="fecha-input"
             value={fecha}
             min={hoyChile()}
             max={maxFechaChile()}
-            onChange={e => { const val = e.target.value; if (val > maxFechaChile()) { alert('Solo puedes reservar con hasta 2 semanas de anticipación.'); return; } setFecha(val) }}
+            onChange={e => setFecha(e.target.value)}
           />
-          <p style={{ marginTop: '8px', fontSize: '0.82rem', color: 'var(--gris)' }}>
-            Solo puedes reservar con hasta <strong>2 semanas</strong> de anticipación. Para fechas más lejanas, contáctate con la directiva de la Junta de Vecinos.
+          {/* Day pills row */}
+          <div className="day-row">
+            {dias.map(d => (
+              <button
+                key={d.ymd}
+                className={`day-pill ${d.ymd === fecha ? 'selected' : ''}`}
+                onClick={() => setFecha(d.ymd)}
+                type="button"
+              >
+                <div className="dia">{d.dia}</div>
+                <div className="num">{d.num}</div>
+                <div className="dot"></div>
+              </button>
+            ))}
+          </div>
+          <p style={{ marginTop: '12px', fontSize: '0.78rem', color: 'var(--ink-dim)' }}>
+            Hasta <strong style={{ color: 'var(--ink)' }}>2 semanas</strong> de anticipación. Para fechas más lejanas,
+            contacta a la directiva.
           </p>
         </div>
 
-        {/* Grid de horas */}
-        <div className="fecha-section">
-          <div className="seccion-titulo">🕐 Horarios disponibles — {fecha.split('-').reverse().join('/')}</div>
-
-          {loading ? (
-            <div className="loading">
-              <div className="spinner"></div>
-              Cargando disponibilidad...
+        <div className="booking-grid">
+          {/* Hours grid */}
+          <div className="card fecha-section">
+            <div className="seccion-titulo">
+              <Icon name="clock" size={17} />
+              {dayLabel(fecha)}
             </div>
-          ) : (
-            <>
-              <div className="horas-grid">
-                {HORAS.map(hora => {
-                  const estado = getEstadoHora(hora)
-                  const seleccionada = horasSeleccionadas.includes(hora)
-                  let cls = 'hora-btn '
-                  if (seleccionada) cls += 'hora-seleccionada'
-                  else if (estado === 'libre') cls += 'hora-libre'
-                  else if (estado === 'ocupada') cls += 'hora-ocupada'
-                  else if (estado === 'bloqueada') cls += 'hora-bloqueada'
-                  else cls += 'hora-pasada'
 
-                  return (
-                    <button
-                      key={hora}
-                      className={cls}
-                      onClick={() => toggleHora(hora)}
-                      disabled={estado !== 'libre'}
-                    >
-                      {formatHora(hora)}
-                      <span className="hora-label">
-                        {seleccionada ? '✓ Seleccionada' :
-                         estado === 'ocupada' ? 'Reservada' :
-                         estado === 'bloqueada' ? 'Bloqueada' :
-                         estado === 'pasada' ? 'No disponible' : 'Disponible'}
-                      </span>
-                    </button>
-                  )
-                })}
+            {loading ? (
+              <div className="loading">
+                <div className="spinner"></div>
+                Cargando disponibilidad...
               </div>
+            ) : (
+              <>
+                <div className="horas-grid">
+                  {HORAS.map(hora => {
+                    const estado = getEstadoHora(hora)
+                    const seleccionada = horasSeleccionadas.includes(hora)
+                    let cls = 'hora-btn '
+                    let label = 'Disponible'
+                    if (seleccionada) { cls += 'hora-seleccionada'; label = 'Tu selección' }
+                    else if (estado === 'libre') { cls += 'hora-libre'; label = 'Disponible' }
+                    else if (estado === 'ocupada') { cls += 'hora-ocupada'; label = 'Reservada' }
+                    else if (estado === 'bloqueada') { cls += 'hora-bloqueada'; label = 'No disponible' }
+                    else { cls += 'hora-pasada'; label = 'No disponible' }
 
-              <div className="leyenda">
-                <div className="leyenda-item">
-                  <div className="leyenda-dot" style={{ background: '#dcfce7', border: '1.5px solid #bbf7d0' }}></div>
-                  Disponible
+                    return (
+                      <button
+                        key={hora}
+                        className={cls}
+                        onClick={() => toggleHora(hora)}
+                        disabled={estado !== 'libre'}
+                        type="button"
+                      >
+                        <span className="hora-num">{formatHora(hora)}</span>
+                        <span className="hora-label">{label}</span>
+                        {seleccionada && (
+                          <span className="hora-check">
+                            <Icon name="check" size={12} color="#fff" />
+                          </span>
+                        )}
+                      </button>
+                    )
+                  })}
                 </div>
-                <div className="leyenda-item">
-                  <div className="leyenda-dot" style={{ background: '#6aaa1e' }}></div>
-                  Seleccionada
+
+                <div className="leyenda">
+                  <div className="leyenda-item">
+                    <span className="leyenda-dot" style={{ background: 'var(--card)' }}></span>
+                    Disponible
+                  </div>
+                  <div className="leyenda-item">
+                    <span className="leyenda-dot" style={{ background: 'var(--verde)', borderColor: 'var(--verde)' }}></span>
+                    Tu selección
+                  </div>
+                  <div className="leyenda-item">
+                    <span className="leyenda-dot" style={{ background: 'var(--bg)' }}></span>
+                    Reservada
+                  </div>
+                  <div className="leyenda-item">
+                    <span className="leyenda-dot" style={{ background: 'var(--verde-pale)', borderColor: 'var(--border-soft)' }}></span>
+                    Club / no disponible
+                  </div>
                 </div>
-                <div className="leyenda-item">
-                  <div className="leyenda-dot" style={{ background: '#fef2f2', border: '1.5px solid #fecaca' }}></div>
-                  Reservada
-                </div>
-                <div className="leyenda-item">
-                  <div className="leyenda-dot" style={{ background: '#f3f4f6', border: '1.5px solid #e5e7eb' }}></div>
-                  Bloqueada
+              </>
+            )}
+          </div>
+
+          {/* Sidebar */}
+          <aside className="booking-sidebar">
+            <div className="summary-card">
+              <div className="summary-kicker">Tu reserva</div>
+              <div className="summary-when">
+                {horasSeleccionadas.length === 0 ? (
+                  <>Aún no<br />elegida</>
+                ) : (
+                  <>
+                    {dayLabel(fecha).split(',')[0]}<br />
+                    {horasSeleccionadas.map(formatHora).join(' y ')} hrs
+                  </>
+                )}
+              </div>
+              <div className="summary-divider"></div>
+              <div className="summary-row">
+                <span className="label">
+                  {horasSeleccionadas.length === 0 ? 'Selecciona horas' : `${horasSeleccionadas.length} hora${horasSeleccionadas.length > 1 ? 's' : ''}`}
+                </span>
+                <span className="summary-price">${monto.toLocaleString('es-CL')}</span>
+              </div>
+              <button
+                className="btn-summary"
+                onClick={abrirModal}
+                disabled={horasSeleccionadas.length === 0}
+              >
+                <span>{horasSeleccionadas.length === 0 ? 'Elige una hora' : 'Continuar a pago'}</span>
+                <Icon name="arrow-right" size={16} color="var(--verde)" />
+              </button>
+            </div>
+
+            <div className="how-card">
+              <div className="how-title">Cómo funciona</div>
+              <div className="how-step">
+                <div className="n">1</div>
+                <div>
+                  <div className="t">Elige día y hora</div>
+                  <div className="d">Puedes reservar 1 o 2 horas seguidas, hasta 2 semanas antes.</div>
                 </div>
               </div>
-            </>
-          )}
+              <div className="how-step">
+                <div className="n">2</div>
+                <div>
+                  <div className="t">Transfiere $10.000</div>
+                  <div className="d">Los datos de la cuenta aparecen en el siguiente paso.</div>
+                </div>
+              </div>
+              <div className="how-step">
+                <div className="n">3</div>
+                <div>
+                  <div className="t">Sube tu comprobante</div>
+                  <div className="d">La directiva confirma en unas horas vía correo.</div>
+                </div>
+              </div>
+            </div>
+          </aside>
         </div>
 
-        {/* Botón reservar */}
+        {/* Sticky CTA (móvil) */}
         {horasSeleccionadas.length > 0 && (
-          <div style={{ position: 'sticky', bottom: '1.5rem', zIndex: 50 }}>
-            <button className="btn-verde" onClick={abrirModal} style={{ boxShadow: '0 8px 24px rgba(106,170,30,0.4)' }}>
-              Reservar {horasSeleccionadas.length === 1 ? formatHora(horasSeleccionadas[0]) : `${formatHora(horasSeleccionadas[0])} y ${formatHora(horasSeleccionadas[1])}`}
-              {' '}— ${monto.toLocaleString('es-CL')}
+          <div className="sticky-cta">
+            <button className="btn-verde btn-split" onClick={abrirModal} type="button">
+              <span>
+                Reservar {horasSeleccionadas.map(formatHora).join(' y ')}
+              </span>
+              <span style={{ display: 'inline-flex', alignItems: 'center', gap: 8 }}>
+                ${monto.toLocaleString('es-CL')}
+                <Icon name="arrow-right" size={16} color="#fff" />
+              </span>
             </button>
           </div>
         )}
       </main>
 
-      {/* Modal reserva */}
+      {/* Modal */}
       {modalAbierto && (
         <div className="overlay" onClick={e => { if (e.target === e.currentTarget) setModalAbierto(false) }}>
           <div className="modal">
             {exito ? (
               <div className="exito-box">
-                <div className="exito-icono">✅</div>
-                <div className="exito-titulo">¡Reserva Confirmada!</div>
+                <div className="exito-icono">
+                  <Icon name="check" size={32} color="var(--verde)" />
+                </div>
+                <div className="kicker" style={{ marginBottom: 6 }}>Reserva confirmada</div>
+                <div className="exito-titulo">¡Listo, {nombre.split(' ')[0]}!</div>
                 <p className="exito-texto">
-                  Tu reserva para el {fecha.split('-').reverse().join('/')} a las{' '}
-                  {horasSeleccionadas.map(h => formatHora(h)).join(' y ')} ha sido registrada exitosamente.
-                  <br /><br />
-                  Recibirás confirmación una vez que el administrador revise tu comprobante.
+                  Tu reserva del <strong style={{ color: 'var(--ink)' }}>{dayLabel(fecha).toLowerCase()}</strong>{' '}
+                  a las <strong style={{ color: 'var(--ink)' }}>{horasSeleccionadas.map(formatHora).join(' y ')}</strong>{' '}
+                  quedó registrada.
                 </p>
-                <button className="btn-verde" style={{ marginTop: '1.5rem' }} onClick={() => { setModalAbierto(false); setHorasSeleccionadas([]) }}>
+
+                <div className="exito-card">
+                  <div className="row"><span className="k">Fecha</span><span className="v">{dayLabel(fecha)}</span></div>
+                  <div className="row"><span className="k">Hora</span><span className="v">{horasSeleccionadas.map(formatHora).join(' y ')} hrs</span></div>
+                  <div className="row"><span className="k">Monto</span><span className="v" style={{ color: 'var(--verde)', fontWeight: 600 }}>${monto.toLocaleString('es-CL')}</span></div>
+                </div>
+
+                <div className="exito-note">
+                  <span className="icon"><Icon name="phone" size={16} color="var(--accent)" /></span>
+                  <div>La directiva confirmará tu comprobante en las próximas horas. Te llegará un correo cuando esté listo.</div>
+                </div>
+
+                <button
+                  className="btn-verde"
+                  onClick={() => { setModalAbierto(false); setHorasSeleccionadas([]) }}
+                >
                   Volver al inicio
                 </button>
               </div>
             ) : (
               <>
-                <div className="modal-titulo">Confirmar Reserva</div>
+                <div className="modal-step">Paso 2 de 2</div>
+                <div className="modal-titulo">Confirmar reserva</div>
                 <div className="modal-subtitulo">
-                  {fecha.split('-').reverse().join('/')} —{' '}
-                  {horasSeleccionadas.map(h => formatHora(h)).join(' y ')}
+                  {dayLabel(fecha)} · {horasSeleccionadas.map(formatHora).join(' y ')} hrs
                 </div>
 
                 {/* Datos transferencia */}
                 <div className="transferencia-box">
-                  <div className="transferencia-titulo">💳 Datos para la Transferencia</div>
+                  <div className="transferencia-titulo">
+                    <Icon name="wallet" size={13} />
+                    Datos para la transferencia
+                  </div>
                   <div className="transferencia-fila">
                     <span className="transferencia-label">Nombre</span>
-                    <span className="transferencia-valor">Junta de Vecinos Urbana 25 Collico</span>
+                    <span className="transferencia-valor">JV Urbana 25 Collico</span>
                   </div>
                   <div className="transferencia-fila">
                     <span className="transferencia-label">RUT</span>
@@ -361,20 +536,20 @@ export default function Home() {
                     <span className="transferencia-valor">Banco Estado</span>
                   </div>
                   <div className="transferencia-fila">
-                    <span className="transferencia-label">Tipo de cuenta</span>
+                    <span className="transferencia-label">Tipo cuenta</span>
                     <span className="transferencia-valor">Chequera Electrónica</span>
                   </div>
                   <div className="transferencia-fila">
-                    <span className="transferencia-label">N° de cuenta</span>
+                    <span className="transferencia-label">N° cuenta</span>
                     <span className="transferencia-valor">721-7-145070-6</span>
                   </div>
-                  <div className="transferencia-fila" style={{ marginTop: '8px' }}>
-                    <span className="transferencia-label">Monto a pagar</span>
+                  <div className="transferencia-fila" style={{ marginTop: 6, alignItems: 'baseline' }}>
+                    <span className="transferencia-label">Monto</span>
                     <span className="monto-grande">${monto.toLocaleString('es-CL')}</span>
                   </div>
                 </div>
 
-                {/* Formulario */}
+                {/* Form */}
                 <div className="form-grupo">
                   <label className="form-label">Nombre completo *</label>
                   <input
@@ -383,7 +558,7 @@ export default function Home() {
                     value={nombre}
                     onChange={e => setNombre(e.target.value)}
                   />
-                  {errores.nombre && <p style={{ color: 'var(--rojo)', fontSize: '0.8rem', marginTop: '4px' }}>{errores.nombre}</p>}
+                  {errores.nombre && <p className="form-error">{errores.nombre}</p>}
                 </div>
 
                 <div className="form-grupo">
@@ -395,7 +570,19 @@ export default function Home() {
                     onChange={e => setCelular(e.target.value)}
                     type="tel"
                   />
-                  {errores.celular && <p style={{ color: 'var(--rojo)', fontSize: '0.8rem', marginTop: '4px' }}>{errores.celular}</p>}
+                  {errores.celular && <p className="form-error">{errores.celular}</p>}
+                </div>
+
+                <div className="form-grupo">
+                  <label className="form-label">Correo electrónico *</label>
+                  <input
+                    className={`form-input ${errores.email ? 'error' : ''}`}
+                    placeholder="Ej: juan@gmail.com"
+                    value={email}
+                    onChange={e => setEmail(e.target.value)}
+                    type="email"
+                  />
+                  {errores.email && <p className="form-error">{errores.email}</p>}
                 </div>
 
                 <div className="form-grupo">
@@ -408,25 +595,35 @@ export default function Home() {
                     />
                     {comprobante ? (
                       <div className="upload-archivo">
-                        <span>📎</span>
-                        <span className="upload-nombre">{comprobante.name}</span>
-                        <span style={{ color: 'var(--verde)', fontWeight: 600, fontSize: '0.8rem' }}>✓</span>
+                        <Icon name="check" size={16} color="var(--verde)" />
+                        <span className="nombre">{comprobante.name}</span>
+                        <span style={{ fontSize: '0.74rem', color: 'var(--ink-dim)' }}>
+                          {(comprobante.size / 1024 / 1024).toFixed(1)} MB
+                        </span>
                       </div>
                     ) : (
                       <>
-                        <div className="upload-icono">📤</div>
+                        <div className="upload-icono">
+                          <Icon name="upload" size={26} />
+                        </div>
                         <div className="upload-texto">
                           Toca aquí para subir tu comprobante<br />
-                          <small>Imagen (JPG, PNG) o PDF — máx. 10MB</small>
+                          <span style={{ fontSize: '0.74rem' }}>Imagen (JPG, PNG) o PDF — máx. 10MB</span>
                         </div>
                       </>
                     )}
                   </div>
-                  {errores.comprobante && <p style={{ color: 'var(--rojo)', fontSize: '0.8rem', marginTop: '4px' }}>{errores.comprobante}</p>}
+                  {errores.comprobante && <p className="form-error">{errores.comprobante}</p>}
                 </div>
 
-                <button className="btn-verde" onClick={handleReservar} disabled={enviando}>
-                  {enviando ? 'Procesando reserva...' : `✅ Confirmar Reserva — $${monto.toLocaleString('es-CL')}`}
+                <button className="btn-verde btn-split" onClick={handleReservar} disabled={enviando}>
+                  <span>{enviando ? 'Procesando reserva...' : 'Confirmar reserva'}</span>
+                  {!enviando && (
+                    <span style={{ display: 'inline-flex', alignItems: 'center', gap: 8 }}>
+                      ${monto.toLocaleString('es-CL')}
+                      <Icon name="arrow-right" size={15} color="#fff" />
+                    </span>
+                  )}
                 </button>
                 <button className="btn-gris" onClick={() => setModalAbierto(false)}>
                   Cancelar
