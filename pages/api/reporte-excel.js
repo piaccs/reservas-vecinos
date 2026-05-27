@@ -1,7 +1,10 @@
 import * as XLSX from 'xlsx'
+import { requireAdmin } from '../../lib/auth'
 
 export default async function handler(req, res) {
   if (req.method !== 'POST') return res.status(405).end()
+
+  if (!requireAdmin(req, res)) return
 
   const { mes, reservas, bloqueos } = req.body
   const [year, month] = mes.split('-')

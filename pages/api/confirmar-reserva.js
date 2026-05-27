@@ -1,18 +1,30 @@
 import nodemailer from 'nodemailer'
+import { createClient } from '@supabase/supabase-js'
+import { crearLimiter } from '../../lib/rateLimiter'
+import { sanitizar, validarUUID } from '../../lib/validators'
+
+const supabase = createClient(
+  process.env.NEXT_PUBLIC_SUPABASE_URL,
+  process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY
+)
+
+// Elimina cualquier etiqueta HTML del texto para evitar XSS en correos
+function sanitizarLegacy(str) {
+  return sanitizar(str)
+}
+
+// 20 confirmaciones por IP cada hora (los admins son 3, esto es más que suficiente)
+const limiter = crearLimiter({ max: 20, ventanaMs: 60 * 60 * 1000 })
 
 export default async function handler(req, res) {
+  if (!limiter.permitir(req, res)) return
+
   const { id, accion } = req.query
 
-  if (!id || !accion) {
-    return res.status(400).send('Parámetros inválidos')
-  }
-
-  // Buscar la reserva
-  const { createClient } = require('@supabase/supabase-js')
-  const supabase = createClient(
-    process.env.NEXT_PUBLIC_SUPABASE_URL,
-    process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY
-  )
+  // Validar parámetros de entrada
+  const idError = validarUUID(id)
+  if (idError) return res.status(400).send('ID de reserva inválido')
+  if (!['aceptar', 'rechazar'].includes(accion)) return res.status(400).send('Acción inválida')
 
   const { data: reserva, error } = await supabase
     .from('reservas')
@@ -37,6 +49,11 @@ export default async function handler(req, res) {
   const hora = `${reserva.hora.toString().padStart(2,'0')}:00`
   const aceptada = accion === 'aceptar'
 
+  // Sanitizar datos del usuario antes de incluir en HTML
+  const nombreSeguro = sanitizarLegacy(reserva.nombre_reservante)
+  const emailSeguro = sanitizarLegacy(reserva.email_reservante)
+  const montoFormateado = Number(reserva.monto || 10000).toLocaleString('es-CL')
+
   const transporter = nodemailer.createTransport({
     service: 'gmail',
     auth: {
@@ -56,7 +73,7 @@ export default async function handler(req, res) {
         <p style="color:rgba(255,255,255,0.9);margin:6px 0 0;font-size:14px">Gimnasio Collico — Junta de Vecinos N°25</p>
       </div>
       <div style="background:white;padding:24px;border-radius:0 0 10px 10px">
-        <p style="font-size:16px">Hola <strong>${reserva.nombre_reservante}</strong>,</p>
+        <p style="font-size:16px">Hola <strong>${nombreSeguro}</strong>,</p>
         <p>Tu reserva ha sido <strong style="color:#4d7d14">confirmada</strong> por la directiva de la Junta de Vecinos.</p>
         <table style="width:100%;border-collapse:collapse;margin:16px 0">
           <tr style="border-bottom:1px solid #f3f4f6">
@@ -69,7 +86,7 @@ export default async function handler(req, res) {
           </tr>
           <tr>
             <td style="padding:10px 0;color:#6b7280;font-size:14px">Monto</td>
-            <td style="padding:10px 0;font-weight:700;color:#4d7d14">$${(reserva.monto||10000).toLocaleString('es-CL')}</td>
+            <td style="padding:10px 0;font-weight:700;color:#4d7d14">$${montoFormateado}</td>
           </tr>
         </table>
         <p style="color:#6b7280;font-size:13px">Por favor llega puntual. Si necesitas cancelar, contáctate con la directiva con anticipación.</p>
@@ -83,7 +100,7 @@ export default async function handler(req, res) {
         <p style="color:rgba(255,255,255,0.9);margin:6px 0 0;font-size:14px">Gimnasio Collico — Junta de Vecinos N°25</p>
       </div>
       <div style="background:white;padding:24px;border-radius:0 0 10px 10px">
-        <p style="font-size:16px">Hola <strong>${reserva.nombre_reservante}</strong>,</p>
+        <p style="font-size:16px">Hola <strong>${nombreSeguro}</strong>,</p>
         <p>Lamentablemente tu reserva para el <strong>${fecha}</strong> a las <strong>${hora} hrs</strong> no pudo ser confirmada.</p>
         <p style="color:#6b7280;font-size:13px">Esto puede deberse a que el comprobante no fue validado o la hora ya no está disponible. Por favor contáctate con la directiva para más información.</p>
         <p style="color:#6b7280;font-size:13px">— Junta de Vecinos Urbana N°25 Collico</p>
@@ -99,7 +116,6 @@ export default async function handler(req, res) {
       html: htmlVecino
     })
 
-    // Actualizar estado en base de datos
     await supabase.from('reservas').update({
       estado: aceptada ? 'confirmada' : 'rechazada'
     }).eq('id', id)
@@ -113,8 +129,8 @@ export default async function handler(req, res) {
       <body><div class="box">
         <div style="font-size:3rem">${aceptada ? '✅' : '❌'}</div>
         <h2>${aceptada ? 'Reserva confirmada' : 'Reserva rechazada'}</h2>
-        <p>Se envió un correo a <strong>${reserva.email_reservante}</strong> con la notificación.</p>
-        <p style="font-size:0.85rem">${reserva.nombre_reservante} — ${fecha} ${hora}</p>
+        <p>Se envió un correo a <strong>${emailSeguro}</strong> con la notificación.</p>
+        <p style="font-size:0.85rem">${nombreSeguro} — ${fecha} ${hora}</p>
       </div></body></html>
     `)
   } catch (err) {
