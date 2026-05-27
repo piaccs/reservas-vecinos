@@ -83,7 +83,7 @@ export default function Home() {
     const hoy = hoyChile()
     const ahoraH = ahoraChileHour()
 
-    if (fecha === hoy && hora <= ahoraH + 1) return 'pasada'
+    if (fecha === hoy && hora <= ahoraH) return 'pasada'
     if (horasOcupadas.includes(hora)) return 'ocupada'
     if (horasBloqueadas.includes(hora)) return 'bloqueada'
     return 'libre'
@@ -238,7 +238,7 @@ export default function Home() {
             value={fecha}
             min={hoyChile()}
             max={maxFechaChile()}
-            onChange={e => setFecha(e.target.value)}
+            onChange={e => { const val = e.target.value; if (val > maxFechaChile()) { alert('Solo puedes reservar con hasta 2 semanas de anticipación.'); return; } setFecha(val) }}
           />
           <p style={{ marginTop: '8px', fontSize: '0.82rem', color: 'var(--gris)' }}>
             Solo puedes reservar con hasta <strong>2 semanas</strong> de anticipación. Para fechas más lejanas, contáctate con la directiva de la Junta de Vecinos.
