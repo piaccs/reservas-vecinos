@@ -51,6 +51,8 @@ export default function AdminPanel() {
   const [diasClub, setDiasClub] = useState([{ dia: 1, hora_inicio: 9, hora_fin: 10 }])
   const [guardandoClub, setGuardandoClub] = useState(false)
   const [clubExpandido, setClubExpandido] = useState(null)
+  const [excepcionesFecha, setExcepcionesFecha] = useState({}) // { 'Club_dia': fecha }
+  const [excepcionesGuardadas, setExcepcionesGuardadas] = useState([])
 
   // Reporte
   const [mesReporte, setMesReporte] = useState(new Date().toISOString().slice(0, 7))
@@ -82,7 +84,7 @@ export default function AdminPanel() {
 
   useEffect(() => {
     if (tab === 'bloqueos') cargarHorasBloqueo()
-    if (tab === 'clubes') cargarClubes()
+    if (tab === 'clubes') { cargarClubes(); cargarExcepciones() }
     if (tab === 'reservas') cargarTodasReservas()
   }, [tab, fechaBloqueo])
 
@@ -189,6 +191,36 @@ export default function AdminPanel() {
       if (fecha.getDay() === club.dia_semana) count++
     }
     return count
+  }
+
+  async function cargarExcepciones() {
+    const { data } = await supabase.from('excepciones_clubes').select('*').order('fecha', { ascending: false })
+    setExcepcionesGuardadas(data || [])
+  }
+
+  async function registrarExcepcion(nombreClub, fecha, horas) {
+    if (!fecha) return alert('Selecciona una fecha')
+    if (!confirm(`¿Marcar el ${fecha.split('-').reverse().join('/')} como "Horas no utilizadas" para ${nombreClub}?\nEstas horas no se contarán en el cobro mensual.`)) return
+    
+    const inserts = horas.map(h => ({
+      nombre_club: nombreClub,
+      fecha,
+      hora: h,
+      motivo: 'Horas no utilizadas',
+      creado_por: admin.email
+    }))
+    
+    const { error } = await supabase.from('excepciones_clubes').insert(inserts)
+    if (error) alert('Error: ' + error.message)
+    else {
+      alert('✅ Marcado como horas no utilizadas. No se cobrarán en el reporte.')
+      await cargarExcepciones()
+    }
+  }
+
+  async function eliminarExcepcion(id) {
+    await supabase.from('excepciones_clubes').delete().eq('id', id)
+    await cargarExcepciones()
   }
 
   async function cargarTodasReservas() {
@@ -780,6 +812,49 @@ export default function AdminPanel() {
                                       ))}
                                     </tbody>
                                   </table>
+                                  {/* Horas no utilizadas */}
+                                  <div style={{ marginTop: '1rem', background: '#fef9c3', border: '1.5px solid #fde68a', borderRadius: '10px', padding: '1rem' }}>
+                                    <div style={{ fontWeight: 600, fontSize: '0.85rem', color: '#92400e', marginBottom: '0.8rem' }}>
+                                      📋 Marcar horas no utilizadas
+                                    </div>
+                                    <p style={{ fontSize: '0.8rem', color: '#78350f', marginBottom: '0.8rem' }}>
+                                      Si el club no utilizó sus horas algún día, márcalo aquí para que no se cobren en el reporte mensual.
+                                    </p>
+                                    {diasAgrupados.map(([diaSem, club]) => (
+                                      <div key={`exc-${diaSem}`} style={{ display: 'flex', gap: '8px', alignItems: 'center', marginBottom: '8px', flexWrap: 'wrap' }}>
+                                        <span style={{ fontSize: '0.82rem', fontWeight: 600, minWidth: '80px', color: '#92400e' }}>{DIAS[club.dia_semana]}</span>
+                                        <input
+                                          type="date"
+                                          className="form-input"
+                                          style={{ fontSize: '0.82rem', padding: '6px 10px', maxWidth: '160px' }}
+                                          value={excepcionesFecha[`${nombre}_${diaSem}`] || ''}
+                                          onChange={e => setExcepcionesFecha(prev => ({ ...prev, [`${nombre}_${diaSem}`]: e.target.value }))}
+                                        />
+                                        <button
+                                          onClick={() => registrarExcepcion(nombre, excepcionesFecha[`${nombre}_${diaSem}`] || '', club.horas)}
+                                          style={{ padding: '6px 14px', background: '#f59e0b', color: 'white', border: 'none', borderRadius: '6px', cursor: 'pointer', fontSize: '0.82rem', fontWeight: 600, fontFamily: 'DM Sans, sans-serif' }}
+                                        >
+                                          Marcar como no utilizado
+                                        </button>
+                                      </div>
+                                    ))}
+                                    {excepcionesGuardadas.filter(e => e.nombre_club === nombre).length > 0 && (
+                                      <div style={{ marginTop: '0.8rem', borderTop: '1px solid #fde68a', paddingTop: '0.8rem' }}>
+                                        <div style={{ fontSize: '0.78rem', fontWeight: 600, color: '#92400e', marginBottom: '6px' }}>Excepciones registradas:</div>
+                                        {[...new Set(excepcionesGuardadas.filter(e => e.nombre_club === nombre).map(e => e.fecha))].map(fecha => (
+                                          <div key={fecha} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', fontSize: '0.8rem', padding: '4px 0', borderBottom: '1px solid #fef3c7' }}>
+                                            <span>📅 {fecha.split('-').reverse().join('/')} — Horas no utilizadas</span>
+                                            <button
+                                              onClick={() => {
+                                                excepcionesGuardadas.filter(e => e.nombre_club === nombre && e.fecha === fecha).forEach(e => eliminarExcepcion(e.id))
+                                              }}
+                                              style={{ color: '#dc2626', background: 'none', border: 'none', cursor: 'pointer', fontSize: '0.8rem' }}
+                                            >✕</button>
+                                          </div>
+                                        ))}
+                                      </div>
+                                    )}
+                                  </div>
                                 </div>
                               )}
                             </div>
@@ -919,7 +994,8 @@ export default function AdminPanel() {
                                 const mockClub = { dia_semana: dia }
                                 return s + calcularHorasClubEnMes(mockClub, mesReporte)
                               }, 0)
-                              const horasTotales = usosEnMes * (dias.length / diasUnicos.length)
+                              const excepcionesClub = pagosClubs.length >= 0 ? [] : [] // placeholder
+              const horasTotales = usosEnMes * (dias.length / diasUnicos.length)
                               const precioPorHora = dias[0].monto > 0 ? dias[0].monto : 10000
                               const montoTotal = dias[0].tipo === 'pagado' ? horasTotales * precioPorHora : 0
                               const pagoRegistrado = pagosClubs.find(p => p.nombre_club === nombre)
