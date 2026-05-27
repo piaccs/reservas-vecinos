@@ -526,7 +526,7 @@ export default function AdminPanel() {
                           <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
                             <span className={`badge ${todosActivos ? 'badge-verde' : 'badge-gris'}`}>{todosActivos ? '✓ Activo' : '⏸ Pausado'}</span>
                             <button
-                              onClick={e => { e.stopPropagation(); if(confirm(`¿Eliminar el club "${nombre}" y todos sus horarios?`)) { dias.forEach(d => supabase.from('bloqueos_semanales').delete().eq('id', d.id)); setTimeout(cargarClubes, 500) } }}
+                              onClick={async e => { e.stopPropagation(); if(confirm(`¿Eliminar el club "${nombre}" y todos sus horarios?`)) { for(const d of dias) { await supabase.from('bloqueos_semanales').delete().eq('id', d.id) } await cargarClubes() } }}
                               style={{ color: 'var(--rojo)', background: 'none', border: 'none', cursor: 'pointer', fontSize: '0.88rem', fontWeight: 600, fontFamily: 'DM Sans, sans-serif' }}
                             >
                               🗑 Eliminar
