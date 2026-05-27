@@ -464,7 +464,7 @@ export default function AdminPanel() {
                     </select>
                     <span style={{ color: 'var(--gris)' }}>a</span>
                     <select className="form-input" style={{ flex: '1', minWidth: '100px' }} value={d.hora_fin} onChange={e => setDiasClub(prev => prev.map((x, j) => j === i ? { ...x, hora_fin: parseInt(e.target.value) } : x))}>
-                      {HORAS.filter(h => h > d.hora_inicio).concat([23]).map(h => <option key={h} value={h}>{formatHora(h)}</option>)}
+                      {HORAS.filter(h => h > parseInt(d.hora_inicio)).map(h => <option key={h} value={h}>{formatHora(h)}</option>)}
                     </select>
                     {diasClub.length > 1 && (
                       <button onClick={() => setDiasClub(prev => prev.filter((_, j) => j !== i))} style={{ color: 'var(--rojo)', background: 'none', border: 'none', cursor: 'pointer', fontSize: '1.2rem', padding: '0 4px' }}>✕</button>
