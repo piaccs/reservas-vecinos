@@ -51,10 +51,6 @@ export default function AdminPanel() {
   const [diasClub, setDiasClub] = useState([{ dia: 1, hora_inicio: 9, hora_fin: 10 }])
   const [guardandoClub, setGuardandoClub] = useState(false)
   const [clubExpandido, setClubExpandido] = useState(null)
-  const [fechaExcepcion, setFechaExcepcion] = useState(hoyChile())
-  const [horasExcepcion, setHorasExcepcion] = useState([])
-  const [excepcionesGuardadas, setExcepcionesGuardadas] = useState([])
-  const [horasClubDelDia, setHorasClubDelDia] = useState([]) // {hora, club}
 
   // Reporte
   const [mesReporte, setMesReporte] = useState(new Date().toISOString().slice(0, 7))
@@ -87,7 +83,6 @@ export default function AdminPanel() {
   useEffect(() => {
     if (tab === 'bloqueos') cargarHorasBloqueo()
     if (tab === 'clubes') { cargarClubes(); cargarExcepciones() }
-    if (tab === 'excepciones') { cargarExcepciones(); cargarHorasClubDelDia(hoyChile()) }
     if (tab === 'reservas') cargarTodasReservas()
   }, [tab, fechaBloqueo])
 
@@ -199,47 +194,6 @@ export default function AdminPanel() {
   async function cargarExcepciones() {
     const { data } = await supabase.from('excepciones_clubes').select('*').order('fecha', { ascending: false })
     setExcepcionesGuardadas(data || [])
-  }
-
-  async function cargarHorasClubDelDia(fecha) {
-    const fechaObj = new Date(fecha + 'T12:00:00')
-    const diaSemana = fechaObj.getDay()
-    const { data } = await supabase
-      .from('bloqueos_semanales')
-      .select('hora_inicio, motivo')
-      .eq('dia_semana', diaSemana)
-      .eq('activo', true)
-    setHorasClubDelDia(data || [])
-    setHorasExcepcion([])
-  }
-
-  async function registrarExcepciones() {
-    if (horasExcepcion.length === 0) return alert('Selecciona al menos una hora')
-    if (!confirm(`¿Marcar ${horasExcepcion.length} hora(s) del ${fechaExcepcion.split('-').reverse().join('/')} como no utilizadas?`)) return
-
-    const inserts = horasExcepcion.map(hora => {
-      const club = horasClubDelDia.find(h => h.hora_inicio === hora)
-      return {
-        nombre_club: club?.motivo || 'Desconocido',
-        fecha: fechaExcepcion,
-        hora,
-        motivo: 'Horas no utilizadas',
-        creado_por: admin.email
-      }
-    })
-
-    const { error } = await supabase.from('excepciones_clubes').insert(inserts)
-    if (error) alert('Error: ' + error.message)
-    else {
-      setHorasExcepcion([])
-      await cargarExcepciones()
-      alert('✅ Horas marcadas como no utilizadas. No se cobrarán en el reporte.')
-    }
-  }
-
-  async function eliminarExcepcion(id) {
-    await supabase.from('excepciones_clubes').delete().eq('id', id)
-    await cargarExcepciones()
   }
 
   async function cargarTodasReservas() {
@@ -844,111 +798,6 @@ export default function AdminPanel() {
               </>
             )}
 
-            {/* ============ TAB EXCEPCIONES ============ */}
-            {tab === 'excepciones' && (
-              <>
-                <div className="admin-page-header">
-                  <div>
-                    <div className="kicker">Gestión de asistencia</div>
-                    <h2>Horas no utilizadas por clubes</h2>
-                    <p>Selecciona una fecha y marca las horas que los clubes no utilizaron ese día. El sistema identificará automáticamente a qué club corresponde cada hora y las descontará del cobro mensual.</p>
-                  </div>
-                </div>
-
-                <div className="card" style={{ marginBottom: '1.5rem' }}>
-                  <div className="form-grupo">
-                    <label className="form-label">Fecha</label>
-                    <input
-                      type="date"
-                      className="form-input"
-                      style={{ maxWidth: '220px' }}
-                      value={fechaExcepcion}
-                      onChange={e => { setFechaExcepcion(e.target.value); cargarHorasClubDelDia(e.target.value) }}
-                    />
-                  </div>
-
-                  {horasClubDelDia.length === 0 ? (
-                    <div style={{ background: '#f9fafb', border: '1.5px dashed #e5e7eb', borderRadius: '10px', padding: '2rem', textAlign: 'center', color: 'var(--ink-dim)', fontSize: '0.88rem' }}>
-                      No hay clubes con horas asignadas para ese día de la semana.
-                    </div>
-                  ) : (
-                    <>
-                      <p style={{ fontSize: '0.85rem', color: 'var(--ink-dim)', marginBottom: '1rem' }}>
-                        Selecciona las horas que <strong>no fueron utilizadas</strong> ese día:
-                      </p>
-                      <div className="horas-grid" style={{ marginBottom: '1.5rem' }}>
-                        {horasClubDelDia.sort((a, b) => a.hora_inicio - b.hora_inicio).map(h => {
-                          const seleccionada = horasExcepcion.includes(h.hora_inicio)
-                          const yaExcepcion = excepcionesGuardadas.some(e => e.fecha === fechaExcepcion && e.hora === h.hora_inicio)
-                          return (
-                            <button
-                              key={h.hora_inicio}
-                              onClick={() => !yaExcepcion && setHorasExcepcion(prev => prev.includes(h.hora_inicio) ? prev.filter(x => x !== h.hora_inicio) : [...prev, h.hora_inicio])}
-                              disabled={yaExcepcion}
-                              style={{
-                                padding: '14px 8px',
-                                borderRadius: '10px',
-                                border: '2px solid',
-                                borderColor: yaExcepcion ? '#fde68a' : seleccionada ? 'var(--verde)' : '#e5e7eb',
-                                background: yaExcepcion ? '#fef9c3' : seleccionada ? 'var(--verde)' : 'white',
-                                color: yaExcepcion ? '#92400e' : seleccionada ? 'white' : 'var(--ink)',
-                                cursor: yaExcepcion ? 'not-allowed' : 'pointer',
-                                textAlign: 'center',
-                                fontFamily: 'inherit',
-                                transition: 'all 0.18s'
-                              }}
-                            >
-                              <div style={{ fontWeight: 700, fontSize: '1rem' }}>{formatHora(h.hora_inicio)}</div>
-                              <div style={{ fontSize: '0.72rem', marginTop: '3px', opacity: 0.8 }}>
-                                {yaExcepcion ? 'Ya marcada' : h.motivo}
-                              </div>
-                            </button>
-                          )
-                        })}
-                      </div>
-
-                      <button
-                        className="btn-verde"
-                        onClick={registrarExcepciones}
-                        disabled={horasExcepcion.length === 0}
-                        style={{ maxWidth: '320px' }}
-                      >
-                        Marcar {horasExcepcion.length} hora(s) como no utilizadas
-                      </button>
-                    </>
-                  )}
-                </div>
-
-                {excepcionesGuardadas.length > 0 && (
-                  <div className="card">
-                    <div className="seccion-titulo" style={{ marginBottom: '1rem' }}>Historial de horas no utilizadas</div>
-                    <div style={{ overflowX: 'auto' }}>
-                      <table className="tabla">
-                        <thead>
-                          <tr><th>Fecha</th><th>Hora</th><th>Club</th><th>Motivo</th><th></th></tr>
-                        </thead>
-                        <tbody>
-                          {excepcionesGuardadas.map(e => (
-                            <tr key={e.id}>
-                              <td>{e.fecha?.split('-').reverse().join('/')}</td>
-                              <td><strong>{formatHora(e.hora)}</strong></td>
-                              <td>{e.nombre_club}</td>
-                              <td style={{ color: 'var(--ink-dim)', fontSize: '0.85rem' }}>{e.motivo}</td>
-                              <td>
-                                <button onClick={() => eliminarExcepcion(e.id)} style={{ color: 'var(--danger)', background: 'none', border: 'none', cursor: 'pointer', fontSize: '0.85rem' }}>
-                                  Eliminar
-                                </button>
-                              </td>
-                            </tr>
-                          ))}
-                        </tbody>
-                      </table>
-                    </div>
-                  </div>
-                )}
-              </>
-            )}
-
             {/* ============ TAB REPORTE ============ */}
             {tab === 'reporte' && (
               <>
@@ -1076,8 +925,13 @@ export default function AdminPanel() {
                                 const mockClub = { dia_semana: dia }
                                 return s + calcularHorasClubEnMes(mockClub, mesReporte)
                               }, 0)
-                              const excepcionesClub = pagosClubs.length >= 0 ? [] : [] // placeholder
-              const horasTotales = usosEnMes * (dias.length / diasUnicos.length)
+                              // Descontar horas bloqueadas manualmente que correspondan a este club
+              const horasBloqClub = bloqueosReporte.filter(b => {
+                const fechaObj = new Date(b.fecha + 'T12:00:00')
+                return diasUnicos.includes(fechaObj.getDay()) && 
+                       dias.some(d => d.dia_semana === fechaObj.getDay() && d.hora_inicio === b.hora)
+              }).length
+              const horasTotales = Math.max(0, usosEnMes * (dias.length / diasUnicos.length) - horasBloqClub)
                               const precioPorHora = dias[0].monto > 0 ? dias[0].monto : 10000
                               const montoTotal = dias[0].tipo === 'pagado' ? horasTotales * precioPorHora : 0
                               const pagoRegistrado = pagosClubs.find(p => p.nombre_club === nombre)
