@@ -51,8 +51,10 @@ export default function AdminPanel() {
   const [diasClub, setDiasClub] = useState([{ dia: 1, hora_inicio: 9, hora_fin: 10 }])
   const [guardandoClub, setGuardandoClub] = useState(false)
   const [clubExpandido, setClubExpandido] = useState(null)
-  const [excepcionesFecha, setExcepcionesFecha] = useState({}) // { 'Club_dia': fecha }
+  const [fechaExcepcion, setFechaExcepcion] = useState(hoyChile())
+  const [horasExcepcion, setHorasExcepcion] = useState([])
   const [excepcionesGuardadas, setExcepcionesGuardadas] = useState([])
+  const [horasClubDelDia, setHorasClubDelDia] = useState([]) // {hora, club}
 
   // Reporte
   const [mesReporte, setMesReporte] = useState(new Date().toISOString().slice(0, 7))
@@ -85,6 +87,7 @@ export default function AdminPanel() {
   useEffect(() => {
     if (tab === 'bloqueos') cargarHorasBloqueo()
     if (tab === 'clubes') { cargarClubes(); cargarExcepciones() }
+    if (tab === 'excepciones') { cargarExcepciones(); cargarHorasClubDelDia(hoyChile()) }
     if (tab === 'reservas') cargarTodasReservas()
   }, [tab, fechaBloqueo])
 
@@ -198,23 +201,39 @@ export default function AdminPanel() {
     setExcepcionesGuardadas(data || [])
   }
 
-  async function registrarExcepcion(nombreClub, fecha, horas) {
-    if (!fecha) return alert('Selecciona una fecha')
-    if (!confirm(`¿Marcar el ${fecha.split('-').reverse().join('/')} como "Horas no utilizadas" para ${nombreClub}?\nEstas horas no se contarán en el cobro mensual.`)) return
-    
-    const inserts = horas.map(h => ({
-      nombre_club: nombreClub,
-      fecha,
-      hora: h,
-      motivo: 'Horas no utilizadas',
-      creado_por: admin.email
-    }))
-    
+  async function cargarHorasClubDelDia(fecha) {
+    const fechaObj = new Date(fecha + 'T12:00:00')
+    const diaSemana = fechaObj.getDay()
+    const { data } = await supabase
+      .from('bloqueos_semanales')
+      .select('hora_inicio, motivo')
+      .eq('dia_semana', diaSemana)
+      .eq('activo', true)
+    setHorasClubDelDia(data || [])
+    setHorasExcepcion([])
+  }
+
+  async function registrarExcepciones() {
+    if (horasExcepcion.length === 0) return alert('Selecciona al menos una hora')
+    if (!confirm(`¿Marcar ${horasExcepcion.length} hora(s) del ${fechaExcepcion.split('-').reverse().join('/')} como no utilizadas?`)) return
+
+    const inserts = horasExcepcion.map(hora => {
+      const club = horasClubDelDia.find(h => h.hora_inicio === hora)
+      return {
+        nombre_club: club?.motivo || 'Desconocido',
+        fecha: fechaExcepcion,
+        hora,
+        motivo: 'Horas no utilizadas',
+        creado_por: admin.email
+      }
+    })
+
     const { error } = await supabase.from('excepciones_clubes').insert(inserts)
     if (error) alert('Error: ' + error.message)
     else {
-      alert('✅ Marcado como horas no utilizadas. No se cobrarán en el reporte.')
+      setHorasExcepcion([])
       await cargarExcepciones()
+      alert('✅ Horas marcadas como no utilizadas. No se cobrarán en el reporte.')
     }
   }
 
@@ -812,49 +831,7 @@ export default function AdminPanel() {
                                       ))}
                                     </tbody>
                                   </table>
-                                  {/* Horas no utilizadas */}
-                                  <div style={{ marginTop: '1rem', background: '#fef9c3', border: '1.5px solid #fde68a', borderRadius: '10px', padding: '1rem' }}>
-                                    <div style={{ fontWeight: 600, fontSize: '0.85rem', color: '#92400e', marginBottom: '0.8rem' }}>
-                                      📋 Marcar horas no utilizadas
-                                    </div>
-                                    <p style={{ fontSize: '0.8rem', color: '#78350f', marginBottom: '0.8rem' }}>
-                                      Si el club no utilizó sus horas algún día, márcalo aquí para que no se cobren en el reporte mensual.
-                                    </p>
-                                    {diasAgrupados.map(([diaSem, club]) => (
-                                      <div key={`exc-${diaSem}`} style={{ display: 'flex', gap: '8px', alignItems: 'center', marginBottom: '8px', flexWrap: 'wrap' }}>
-                                        <span style={{ fontSize: '0.82rem', fontWeight: 600, minWidth: '80px', color: '#92400e' }}>{DIAS[club.dia_semana]}</span>
-                                        <input
-                                          type="date"
-                                          className="form-input"
-                                          style={{ fontSize: '0.82rem', padding: '6px 10px', maxWidth: '160px' }}
-                                          value={excepcionesFecha[`${nombre}_${diaSem}`] || ''}
-                                          onChange={e => setExcepcionesFecha(prev => ({ ...prev, [`${nombre}_${diaSem}`]: e.target.value }))}
-                                        />
-                                        <button
-                                          onClick={() => registrarExcepcion(nombre, excepcionesFecha[`${nombre}_${diaSem}`] || '', club.horas)}
-                                          style={{ padding: '6px 14px', background: '#f59e0b', color: 'white', border: 'none', borderRadius: '6px', cursor: 'pointer', fontSize: '0.82rem', fontWeight: 600, fontFamily: 'DM Sans, sans-serif' }}
-                                        >
-                                          Marcar como no utilizado
-                                        </button>
-                                      </div>
-                                    ))}
-                                    {excepcionesGuardadas.filter(e => e.nombre_club === nombre).length > 0 && (
-                                      <div style={{ marginTop: '0.8rem', borderTop: '1px solid #fde68a', paddingTop: '0.8rem' }}>
-                                        <div style={{ fontSize: '0.78rem', fontWeight: 600, color: '#92400e', marginBottom: '6px' }}>Excepciones registradas:</div>
-                                        {[...new Set(excepcionesGuardadas.filter(e => e.nombre_club === nombre).map(e => e.fecha))].map(fecha => (
-                                          <div key={fecha} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', fontSize: '0.8rem', padding: '4px 0', borderBottom: '1px solid #fef3c7' }}>
-                                            <span>📅 {fecha.split('-').reverse().join('/')} — Horas no utilizadas</span>
-                                            <button
-                                              onClick={() => {
-                                                excepcionesGuardadas.filter(e => e.nombre_club === nombre && e.fecha === fecha).forEach(e => eliminarExcepcion(e.id))
-                                              }}
-                                              style={{ color: '#dc2626', background: 'none', border: 'none', cursor: 'pointer', fontSize: '0.8rem' }}
-                                            >✕</button>
-                                          </div>
-                                        ))}
-                                      </div>
-                                    )}
-                                  </div>
+
                                 </div>
                               )}
                             </div>
@@ -864,6 +841,111 @@ export default function AdminPanel() {
                     )}
                   </div>
                 </div>
+              </>
+            )}
+
+            {/* ============ TAB EXCEPCIONES ============ */}
+            {tab === 'excepciones' && (
+              <>
+                <div className="admin-page-header">
+                  <div>
+                    <div className="kicker">Gestión de asistencia</div>
+                    <h2>Horas no utilizadas por clubes</h2>
+                    <p>Selecciona una fecha y marca las horas que los clubes no utilizaron ese día. El sistema identificará automáticamente a qué club corresponde cada hora y las descontará del cobro mensual.</p>
+                  </div>
+                </div>
+
+                <div className="card" style={{ marginBottom: '1.5rem' }}>
+                  <div className="form-grupo">
+                    <label className="form-label">Fecha</label>
+                    <input
+                      type="date"
+                      className="form-input"
+                      style={{ maxWidth: '220px' }}
+                      value={fechaExcepcion}
+                      onChange={e => { setFechaExcepcion(e.target.value); cargarHorasClubDelDia(e.target.value) }}
+                    />
+                  </div>
+
+                  {horasClubDelDia.length === 0 ? (
+                    <div style={{ background: '#f9fafb', border: '1.5px dashed #e5e7eb', borderRadius: '10px', padding: '2rem', textAlign: 'center', color: 'var(--ink-dim)', fontSize: '0.88rem' }}>
+                      No hay clubes con horas asignadas para ese día de la semana.
+                    </div>
+                  ) : (
+                    <>
+                      <p style={{ fontSize: '0.85rem', color: 'var(--ink-dim)', marginBottom: '1rem' }}>
+                        Selecciona las horas que <strong>no fueron utilizadas</strong> ese día:
+                      </p>
+                      <div className="horas-grid" style={{ marginBottom: '1.5rem' }}>
+                        {horasClubDelDia.sort((a, b) => a.hora_inicio - b.hora_inicio).map(h => {
+                          const seleccionada = horasExcepcion.includes(h.hora_inicio)
+                          const yaExcepcion = excepcionesGuardadas.some(e => e.fecha === fechaExcepcion && e.hora === h.hora_inicio)
+                          return (
+                            <button
+                              key={h.hora_inicio}
+                              onClick={() => !yaExcepcion && setHorasExcepcion(prev => prev.includes(h.hora_inicio) ? prev.filter(x => x !== h.hora_inicio) : [...prev, h.hora_inicio])}
+                              disabled={yaExcepcion}
+                              style={{
+                                padding: '14px 8px',
+                                borderRadius: '10px',
+                                border: '2px solid',
+                                borderColor: yaExcepcion ? '#fde68a' : seleccionada ? 'var(--verde)' : '#e5e7eb',
+                                background: yaExcepcion ? '#fef9c3' : seleccionada ? 'var(--verde)' : 'white',
+                                color: yaExcepcion ? '#92400e' : seleccionada ? 'white' : 'var(--ink)',
+                                cursor: yaExcepcion ? 'not-allowed' : 'pointer',
+                                textAlign: 'center',
+                                fontFamily: 'inherit',
+                                transition: 'all 0.18s'
+                              }}
+                            >
+                              <div style={{ fontWeight: 700, fontSize: '1rem' }}>{formatHora(h.hora_inicio)}</div>
+                              <div style={{ fontSize: '0.72rem', marginTop: '3px', opacity: 0.8 }}>
+                                {yaExcepcion ? 'Ya marcada' : h.motivo}
+                              </div>
+                            </button>
+                          )
+                        })}
+                      </div>
+
+                      <button
+                        className="btn-verde"
+                        onClick={registrarExcepciones}
+                        disabled={horasExcepcion.length === 0}
+                        style={{ maxWidth: '320px' }}
+                      >
+                        Marcar {horasExcepcion.length} hora(s) como no utilizadas
+                      </button>
+                    </>
+                  )}
+                </div>
+
+                {excepcionesGuardadas.length > 0 && (
+                  <div className="card">
+                    <div className="seccion-titulo" style={{ marginBottom: '1rem' }}>Historial de horas no utilizadas</div>
+                    <div style={{ overflowX: 'auto' }}>
+                      <table className="tabla">
+                        <thead>
+                          <tr><th>Fecha</th><th>Hora</th><th>Club</th><th>Motivo</th><th></th></tr>
+                        </thead>
+                        <tbody>
+                          {excepcionesGuardadas.map(e => (
+                            <tr key={e.id}>
+                              <td>{e.fecha?.split('-').reverse().join('/')}</td>
+                              <td><strong>{formatHora(e.hora)}</strong></td>
+                              <td>{e.nombre_club}</td>
+                              <td style={{ color: 'var(--ink-dim)', fontSize: '0.85rem' }}>{e.motivo}</td>
+                              <td>
+                                <button onClick={() => eliminarExcepcion(e.id)} style={{ color: 'var(--danger)', background: 'none', border: 'none', cursor: 'pointer', fontSize: '0.85rem' }}>
+                                  Eliminar
+                                </button>
+                              </td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                  </div>
+                )}
               </>
             )}
 
