@@ -89,7 +89,7 @@ export default function AdminPanel() {
   }, [])
 
   useEffect(() => {
-    if (tab === 'bloqueos') cargarHorasBloqueo()
+    if (tab === 'bloqueos') { cargarHorasBloqueo(); cargarClubes() }
     if (tab === 'clubes') { cargarClubes(); cargarExcepciones() }
     if (tab === 'reservas') cargarTodasReservas()
   }, [tab, fechaBloqueo])
@@ -567,19 +567,7 @@ export default function AdminPanel() {
                       </div>
                     </div>
 
-                    <div style={{ display: 'grid', gridTemplateColumns: tipoBloqueo === 'gratuito' || tipoBloqueo === 'pagado' ? '1fr 1fr' : '1fr', gap: 12 }}>
-                      {(tipoBloqueo === 'gratuito' || tipoBloqueo === 'pagado') && (
-                      <div className="form-grupo" style={{ marginBottom: 0 }}>
-                        <label className="form-label">Motivo</label>
-                        <input
-                          className="form-input"
-                          placeholder="Ej: Mantención cancha"
-                          value={motivoBloqueo}
-                          onChange={e => setMotivoBloqueo(e.target.value)}
-                        />
-                      </div>
-                      )}
-                      <div className="form-grupo" style={{ marginBottom: 0 }}>
+                    <div className="form-grupo">
                         <label className="form-label">Tipo</label>
                         <div className="toggle-row" style={{ flexWrap: 'wrap' }}>
                           {[
@@ -609,10 +597,21 @@ export default function AdminPanel() {
                           </p>
                         )}
                       </div>
-                    </div>
+
+                    {(tipoBloqueo === 'gratuito' || tipoBloqueo === 'pagado') && (
+                      <div className="form-grupo">
+                        <label className="form-label">Motivo</label>
+                        <input
+                          className="form-input"
+                          placeholder="Ej: Mantención cancha"
+                          value={motivoBloqueo}
+                          onChange={e => setMotivoBloqueo(e.target.value)}
+                        />
+                      </div>
+                    )}
 
                     {(tipoBloqueo === 'pagado' || tipoBloqueo === 'hora_extra_club') && (
-                      <div className="form-grupo" style={{ marginTop: 12 }}>
+                      <div className="form-grupo">
                         <label className="form-label">
                           Monto por hora ($)
                           {horasSelBloqueo.length > 1 && montoBloqueo && (
@@ -632,7 +631,7 @@ export default function AdminPanel() {
                     )}
 
                     {(tipoBloqueo === 'hora_extra_club' || tipoBloqueo === 'recuperacion_club') && (
-                      <div className="form-grupo" style={{ marginTop: 12 }}>
+                      <div className="form-grupo">
                         <label className="form-label">Club</label>
                         <select
                           className="form-input"
