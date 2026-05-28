@@ -245,29 +245,40 @@ export default function AdminPanel() {
     if (horasSelBloqueo.length === 0) return alert('Selecciona al menos una hora')
     if (!motivoBloqueo.trim() && tipoBloqueo !== 'hora_extra_club' && tipoBloqueo !== 'recuperacion_club') return alert('Escribe el motivo del bloqueo')
     if (tipoBloqueo === 'pagado' && !montoBloqueo) return alert('Escribe el monto por hora')
+    if (tipoBloqueo === 'hora_extra_club' && !montoBloqueo) return alert('Escribe el monto por hora')
     if ((tipoBloqueo === 'hora_extra_club' || tipoBloqueo === 'recuperacion_club') && !clubBloqueo) return alert('Selecciona el club')
     setGuardandoBloqueo(true)
 
-    // Determinar tipo real para la tabla bloqueos
-    const tipoReal = tipoBloqueo === 'hora_extra_club' ? 'pagado' : tipoBloqueo === 'recuperacion_club' ? 'pagado' : tipoBloqueo
+    // Para recuperacion, el monto se toma del club automáticamente
+    const clubData = clubBloqueo ? clubes.filter(c => c.motivo === clubBloqueo) : []
+    const montoPorHoraClub = clubData.length > 0 && clubData[0].tipo === 'pagado' ? (clubData[0].monto || 10000) : 0
+
     const motivoReal = tipoBloqueo === 'hora_extra_club'
       ? `Hora extra — ${clubBloqueo}`
       : tipoBloqueo === 'recuperacion_club'
       ? `Recuperación — ${clubBloqueo}`
       : motivoBloqueo.trim()
 
+    const montoPorHora = tipoBloqueo === 'pagado'
+      ? parseInt(montoBloqueo)
+      : tipoBloqueo === 'hora_extra_club'
+      ? parseInt(montoBloqueo)
+      : tipoBloqueo === 'recuperacion_club'
+      ? montoPorHoraClub
+      : 0
+
     const bloqueos = horasSelBloqueo.map(hora => ({
       fecha: fechaBloqueo, hora,
       motivo: motivoReal,
-      tipo: tipoReal,
-      monto: tipoBloqueo === 'pagado' ? parseInt(montoBloqueo) : tipoBloqueo === 'hora_extra_club' || tipoBloqueo === 'recuperacion_club' ? parseInt(montoBloqueo) || 10000 : 0,
+      tipo: montoPorHora > 0 ? 'pagado' : 'gratuito',
+      monto: montoPorHora,
       bloqueado_por: admin.email,
       indefinido: false
     }))
     const { error } = await supabase.from('bloqueos').insert(bloqueos)
     if (error) { alert('Error: ' + error.message); setGuardandoBloqueo(false); return }
 
-    // Registrar excepción automáticamente para hora_extra_club y recuperacion_club
+    // Registrar excepción para hora_extra_club y recuperacion_club
     if (tipoBloqueo === 'hora_extra_club' || tipoBloqueo === 'recuperacion_club') {
       const tipoExc = tipoBloqueo === 'hora_extra_club' ? 'hora_extra' : 'recuperacion'
       const excepciones = horasSelBloqueo.map(hora => ({
@@ -280,6 +291,26 @@ export default function AdminPanel() {
         registrado_por: admin.email
       }))
       await supabase.from('excepciones_clubes').insert(excepciones)
+    }
+
+    // Sobrebloqueo automático: si la hora coincide con horario de un club activo
+    if (tipoBloqueo === 'gratuito' || tipoBloqueo === 'pagado') {
+      const fechaObj = new Date(fechaBloqueo + 'T12:00:00')
+      const diaSemana = fechaObj.getDay()
+      for (const hora of horasSelBloqueo) {
+        const clubAfectado = clubes.find(c => c.dia_semana === diaSemana && c.hora_inicio === hora && c.activo)
+        if (clubAfectado) {
+          await supabase.from('excepciones_clubes').insert({
+            nombre_club: clubAfectado.motivo,
+            fecha: fechaBloqueo,
+            hora,
+            tipo: 'sobrebloqueada',
+            liberar_hora: false,
+            notas: `Sobrebloqueo automático — ${motivoBloqueo.trim()}`,
+            registrado_por: admin.email
+          })
+        }
+      }
     }
 
     alert('✓ Horas bloqueadas')
@@ -360,6 +391,7 @@ export default function AdminPanel() {
 
   const totalReservas = reservasReporte.reduce((s, r) => s + (r.monto || 10000), 0)
   const totalBloqueosPagados = bloqueosReporte.filter(b => b.tipo === 'pagado').reduce((s, b) => s + (b.monto || 0), 0)
+  const totalBloqueosIndividuales = bloqueosReporte.filter(b => b.tipo === 'pagado' && !b.motivo?.startsWith('Hora extra —') && !b.motivo?.startsWith('Recuperación —')).reduce((s, b) => s + (b.monto || 0), 0)
 
   const reservasFiltradas = todasReservas.filter(r => {
     const hoy = hoyChile()
@@ -579,7 +611,7 @@ export default function AdminPanel() {
                       </div>
                     </div>
 
-                    {(tipoBloqueo === 'pagado' || tipoBloqueo === 'hora_extra_club' || tipoBloqueo === 'recuperacion_club') && (
+                    {(tipoBloqueo === 'pagado' || tipoBloqueo === 'hora_extra_club') && (
                       <div className="form-grupo" style={{ marginTop: 12 }}>
                         <label className="form-label">
                           Monto por hora ($)
@@ -610,6 +642,16 @@ export default function AdminPanel() {
                           <option value="">Seleccionar club…</option>
                           {nombresClubs.map(n => <option key={n} value={n}>{n}</option>)}
                         </select>
+                        {tipoBloqueo === 'recuperacion_club' && clubBloqueo && (() => {
+                          const cd = clubes.filter(c => c.motivo === clubBloqueo)
+                          const esPagado = cd.length > 0 && cd[0].tipo === 'pagado'
+                          const monto = esPagado ? (cd[0].monto || 10000) : 0
+                          return (
+                            <p style={{ fontSize: '0.76rem', color: 'var(--verde)', marginTop: 6 }}>
+                              Monto automático: {esPagado ? `$${monto.toLocaleString('es-CL')}/hr` : 'Gratuito ($0)'}
+                            </p>
+                          )
+                        })()}
                       </div>
                     )}
 
@@ -969,8 +1011,8 @@ export default function AdminPanel() {
                       </div>
                       <div className="stat-card">
                         <div className="label">Total ingresos</div>
-                        <div className="value">${(totalReservas + totalBloqueosPagados).toLocaleString('es-CL')}</div>
-                        <div className="sub">reservas + clubes</div>
+                        <div className="value">${(totalReservas + totalBloqueosIndividuales).toLocaleString('es-CL')}</div>
+                        <div className="sub">reservas + bloqueos pagados</div>
                       </div>
                     </div>
 
@@ -1123,6 +1165,47 @@ export default function AdminPanel() {
                                 ))}
                               </div>
                             )}
+                          </div>
+                        </div>
+                      )
+                    })()}
+
+                    {/* Tabla bloqueos individuales pagados */}
+                    {(() => {
+                      const bloqueosIndividuales = bloqueosReporte.filter(b =>
+                        b.tipo === 'pagado' &&
+                        !b.motivo?.startsWith('Hora extra —') &&
+                        !b.motivo?.startsWith('Recuperación —')
+                      )
+                      const totalBloqInd = bloqueosIndividuales.reduce((s, b) => s + (b.monto || 0), 0)
+                      if (bloqueosIndividuales.length === 0) return null
+                      return (
+                        <div className="card" style={{ padding: 0, overflow: 'hidden', marginBottom: 20 }}>
+                          <div style={{ padding: '16px 22px', borderBottom: '1px solid var(--border-soft)', display: 'flex', justifyContent: 'space-between', alignItems: 'baseline' }}>
+                            <div className="seccion-titulo" style={{ marginBottom: 0 }}>Bloqueos individuales pagados</div>
+                            <div style={{ fontSize: '0.78rem', color: 'var(--ink-dim)' }}>{bloqueosIndividuales.length} bloqueos · ${totalBloqInd.toLocaleString('es-CL')}</div>
+                          </div>
+                          <div style={{ overflowX: 'auto' }}>
+                            <table className="tabla">
+                              <thead>
+                                <tr>
+                                  <th style={{ paddingLeft: 22 }}>Fecha</th>
+                                  <th>Hora</th>
+                                  <th>Motivo</th>
+                                  <th style={{ textAlign: 'right', paddingRight: 22 }}>Monto</th>
+                                </tr>
+                              </thead>
+                              <tbody>
+                                {bloqueosIndividuales.map(b => (
+                                  <tr key={b.id}>
+                                    <td style={{ paddingLeft: 22 }} className="num-strong">{formatFechaCorta(b.fecha)}</td>
+                                    <td className="num-strong">{formatHora(b.hora)}</td>
+                                    <td>{b.motivo}</td>
+                                    <td style={{ textAlign: 'right', paddingRight: 22, color: 'var(--verde)', fontWeight: 600 }}>${(b.monto || 0).toLocaleString('es-CL')}</td>
+                                  </tr>
+                                ))}
+                              </tbody>
+                            </table>
                           </div>
                         </div>
                       )
