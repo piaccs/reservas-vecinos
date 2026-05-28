@@ -293,22 +293,29 @@ export default function AdminPanel() {
       await supabase.from('excepciones_clubes').insert(excepciones)
     }
 
-    // Sobrebloqueo automático: si la hora coincide con horario de un club activo
+    // Sobrebloqueo automático: consulta Supabase directamente
     if (tipoBloqueo === 'gratuito' || tipoBloqueo === 'pagado') {
       const fechaObj = new Date(fechaBloqueo + 'T12:00:00')
       const diaSemana = fechaObj.getDay()
-      for (const hora of horasSelBloqueo) {
-        const clubAfectado = clubes.find(c => c.dia_semana === diaSemana && c.hora_inicio === hora && c.activo)
-        if (clubAfectado) {
-          await supabase.from('excepciones_clubes').insert({
-            nombre_club: clubAfectado.motivo,
-            fecha: fechaBloqueo,
-            hora,
-            tipo: 'sobrebloqueada',
-            liberar_hora: false,
-            notas: `Sobrebloqueo automático — ${motivoBloqueo.trim()}`,
-            registrado_por: admin.email
-          })
+      const { data: clubesActivos } = await supabase
+        .from('bloqueos_semanales')
+        .select('motivo, hora_inicio')
+        .eq('dia_semana', diaSemana)
+        .eq('activo', true)
+      if (clubesActivos && clubesActivos.length > 0) {
+        for (const hora of horasSelBloqueo) {
+          const clubAfectado = clubesActivos.find(c => c.hora_inicio === hora)
+          if (clubAfectado) {
+            await supabase.from('excepciones_clubes').insert({
+              nombre_club: clubAfectado.motivo,
+              fecha: fechaBloqueo,
+              hora,
+              tipo: 'sobrebloqueada',
+              liberar_hora: false,
+              notas: `Sobrebloqueo automático — ${motivoBloqueo.trim()}`,
+              registrado_por: admin.email
+            })
+          }
         }
       }
     }
