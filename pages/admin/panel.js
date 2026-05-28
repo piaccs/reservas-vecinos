@@ -52,6 +52,12 @@ export default function AdminPanel() {
   const [guardandoClub, setGuardandoClub] = useState(false)
   const [clubExpandido, setClubExpandido] = useState(null)
 
+  // Excepciones
+  const [excepcionesGuardadas, setExcepcionesGuardadas] = useState([])
+  const [nuevaExcepcion, setNuevaExcepcion] = useState({ nombre_club: '', fecha: hoyChile(), hora: 9, tipo: 'sobrebloqueada', liberar_hora: false, notas: '' })
+  const [guardandoExcepcion, setGuardandoExcepcion] = useState(false)
+  const [mostrarFormExcepcion, setMostrarFormExcepcion] = useState(false)
+
   // Reporte
   const [mesReporte, setMesReporte] = useState(new Date().toISOString().slice(0, 7))
   const [reservasReporte, setReservasReporte] = useState([])
@@ -59,6 +65,7 @@ export default function AdminPanel() {
   const [cargandoReporte, setCargandoReporte] = useState(false)
   const [pagosClubs, setPagosClubs] = useState([])
   const [clubesSemanales, setClubesSemanales] = useState([])
+  const [excepcionesReporte, setExcepcionesReporte] = useState([])
   const [nuevoPago, setNuevoPago] = useState({ nombre_club: '', monto_pagado: '', fecha_pago: hoyChile(), notas: '' })
   const [guardandoPago, setGuardandoPago] = useState(false)
 
@@ -101,17 +108,20 @@ export default function AdminPanel() {
     setClubes(data || [])
   }
 
+  async function cargarExcepciones() {
+    const { data } = await supabase.from('excepciones_clubes').select('*').order('fecha', { ascending: false })
+    setExcepcionesGuardadas(data || [])
+  }
+
   async function agregarClub() {
     if (!nuevoClub.motivo.trim()) return alert('Escribe el nombre del club')
     if (nuevoClub.tipo === 'pagado' && !nuevoClub.monto) return alert('Escribe el monto')
     const diasValidos = diasClub.every(d => parseInt(d.hora_fin) > parseInt(d.hora_inicio))
     if (!diasValidos) {
       setDiasClub(prev => prev.map(d => ({ ...d, hora_fin: parseInt(d.hora_fin) <= parseInt(d.hora_inicio) ? parseInt(d.hora_inicio) + 1 : parseInt(d.hora_fin) })))
-      setGuardandoClub(false)
       return alert('Se corrigieron las horas automáticamente. Intenta de nuevo.')
     }
     setGuardandoClub(true)
-
     const horas = []
     for (const d of diasClub) {
       for (let h = d.hora_inicio; h < d.hora_fin; h++) {
@@ -125,7 +135,6 @@ export default function AdminPanel() {
         })
       }
     }
-
     const { error } = await supabase.from('bloqueos_semanales').insert(horas)
     if (error) alert('Error: ' + error.message)
     else {
@@ -140,6 +149,34 @@ export default function AdminPanel() {
   async function toggleClub(id, activo) {
     await supabase.from('bloqueos_semanales').update({ activo: !activo }).eq('id', id)
     await cargarClubes()
+  }
+
+  async function guardarExcepcion() {
+    if (!nuevaExcepcion.nombre_club) return alert('Selecciona un club')
+    setGuardandoExcepcion(true)
+    const { error } = await supabase.from('excepciones_clubes').insert({
+      nombre_club: nuevaExcepcion.nombre_club,
+      fecha: nuevaExcepcion.fecha,
+      hora: parseInt(nuevaExcepcion.hora),
+      tipo: nuevaExcepcion.tipo,
+      liberar_hora: nuevaExcepcion.tipo === 'aviso_anticipado' ? nuevaExcepcion.liberar_hora : false,
+      notas: nuevaExcepcion.notas || null,
+      registrado_por: admin.email
+    })
+    if (error) alert('Error: ' + error.message)
+    else {
+      setNuevaExcepcion({ nombre_club: '', fecha: hoyChile(), hora: 9, tipo: 'sobrebloqueada', liberar_hora: false, notas: '' })
+      setMostrarFormExcepcion(false)
+      await cargarExcepciones()
+      alert('✓ Excepción registrada')
+    }
+    setGuardandoExcepcion(false)
+  }
+
+  async function eliminarExcepcion(id) {
+    if (!confirm('¿Eliminar esta excepción?')) return
+    await supabase.from('excepciones_clubes').delete().eq('id', id)
+    await cargarExcepciones()
   }
 
   async function cargarPagosClubs(mes) {
@@ -180,20 +217,15 @@ export default function AdminPanel() {
     await cargarPagosClubs(mesReporte)
   }
 
-  function calcularHorasClubEnMes(club, mes) {
+  function calcularHorasClubEnMes(diaSemana, mes) {
     const [year, month] = mes.split('-').map(Number)
     const diasEnMes = new Date(year, month, 0).getDate()
     let count = 0
     for (let d = 1; d <= diasEnMes; d++) {
       const fecha = new Date(year, month - 1, d)
-      if (fecha.getDay() === club.dia_semana) count++
+      if (fecha.getDay() === diaSemana) count++
     }
     return count
-  }
-
-  async function cargarExcepciones() {
-    const { data } = await supabase.from('excepciones_clubes').select('*').order('fecha', { ascending: false })
-    setExcepcionesGuardadas(data || [])
   }
 
   async function cargarTodasReservas() {
@@ -213,7 +245,6 @@ export default function AdminPanel() {
     if (!motivoBloqueo.trim()) return alert('Escribe el motivo del bloqueo')
     if (tipoBloqueo === 'pagado' && !montoBloqueo) return alert('Escribe el monto')
     setGuardandoBloqueo(true)
-
     const bloqueos = horasSelBloqueo.map(hora => ({
       fecha: fechaBloqueo, hora,
       motivo: motivoBloqueo.trim(),
@@ -225,7 +256,6 @@ export default function AdminPanel() {
     const { error } = await supabase.from('bloqueos').insert(bloqueos)
     if (error) alert('Error: ' + error.message)
     else { alert('✓ Horas bloqueadas'); await cargarHorasBloqueo() }
-
     setHorasSelBloqueo([])
     setMotivoBloqueo('')
     setMontoBloqueo('')
@@ -254,19 +284,22 @@ export default function AdminPanel() {
       .gte('fecha', inicio).lte('fecha', fin).eq('estado', 'confirmada').order('fecha').order('hora')
     const { data: bloqueos } = await supabase.from('bloqueos').select('*')
       .gte('fecha', inicio).lte('fecha', fin).order('fecha').order('hora')
+    const { data: excepciones } = await supabase.from('excepciones_clubes').select('*')
+      .gte('fecha', inicio).lte('fecha', fin)
     setReservasReporte(reservas || [])
     setBloqueosReporte(bloqueos || [])
+    setExcepcionesReporte(excepciones || [])
     await cargarPagosClubs(mesReporte)
     await cargarClubesSemanales()
     setCargandoReporte(false)
   }
 
   async function descargarExcel() {
-    if (reservasReporte.length === 0 && bloqueosReporte.length === 0) return alert('Carga el reporte primero.')
+    if (reservasReporte.length === 0 && bloqueosReporte.length === 0 && clubesSemanales.length === 0) return alert('Carga el reporte primero.')
     const res = await fetch('/api/reporte-excel', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ mes: mesReporte, reservas: reservasReporte, bloqueos: bloqueosReporte })
+      body: JSON.stringify({ mes: mesReporte, reservas: reservasReporte, bloqueos: bloqueosReporte, excepciones: excepcionesReporte, clubes: clubesSemanales })
     })
     const blob = await res.blob()
     const url = URL.createObjectURL(blob)
@@ -299,7 +332,6 @@ export default function AdminPanel() {
   const totalReservas = reservasReporte.reduce((s, r) => s + (r.monto || 10000), 0)
   const totalBloqueosPagados = bloqueosReporte.filter(b => b.tipo === 'pagado').reduce((s, b) => s + (b.monto || 0), 0)
 
-  // Filtros de reservas
   const reservasFiltradas = todasReservas.filter(r => {
     const hoy = hoyChile()
     if (filtroReservas === 'proximas' && r.fecha < hoy) return false
@@ -314,6 +346,9 @@ export default function AdminPanel() {
   const totalProximas = todasReservas.filter(r => r.fecha >= hoyChile()).length
   const totalPasadas = todasReservas.filter(r => r.fecha < hoyChile()).length
 
+  // Nombres únicos de clubes para selector
+  const nombresClubs = [...new Set(clubes.map(c => c.motivo))]
+
   if (!admin) return <div className="loading"><div className="spinner"></div>Verificando…</div>
 
   const tabs = [
@@ -323,6 +358,35 @@ export default function AdminPanel() {
     { id: 'reservas', label: 'Ver reservas', icon: 'list' },
     { id: 'cuenta',   label: 'Mi cuenta', icon: 'settings' },
   ]
+
+  // Calcular resumen de club para reporte
+  function calcularResumenClub(nombre, diasClub) {
+    const diasUnicos = [...new Set(diasClub.map(d => d.dia_semana))]
+    const horasPorSemana = diasClub.length / diasUnicos.length
+
+    // Horas programadas en el mes
+    const horasProgramadas = diasUnicos.reduce((s, dia) => {
+      return s + calcularHorasClubEnMes(dia, mesReporte) * horasPorSemana
+    }, 0)
+
+    const excClub = excepcionesReporte.filter(e => e.nombre_club === nombre)
+    const horasSobrebloqueadas = excClub.filter(e => e.tipo === 'sobrebloqueada').length
+    const horasConAviso = excClub.filter(e => e.tipo === 'aviso_anticipado').length
+    const horasRecuperadas = excClub.filter(e => e.tipo === 'recuperacion').length
+
+    // Horas a cobrar = programadas - sobrebloqueadas - con aviso + recuperadas
+    const horasACobrar = Math.max(0, horasProgramadas - horasSobrebloqueadas - horasConAviso + horasRecuperadas)
+    const precioPorHora = diasClub[0].monto > 0 ? diasClub[0].monto : 10000
+    const montoTotal = diasClub[0].tipo === 'pagado' ? horasACobrar * precioPorHora : 0
+
+    return { horasProgramadas, horasSobrebloqueadas, horasConAviso, horasRecuperadas, horasACobrar, montoTotal, precioPorHora }
+  }
+
+  const TIPO_EXCEPCION = {
+    sobrebloqueada: { label: 'Sobrebloqueada', color: 'badge-rojo', desc: 'La directiva bloqueó esta hora — no se cobra' },
+    aviso_anticipado: { label: 'Avisaron con anticipación', color: 'badge-amarillo', desc: 'El club avisó que no vendría — no se cobra' },
+    recuperacion: { label: 'Recuperación de hora', color: 'badge-verde', desc: 'El club recuperó una hora perdida — se cobra' },
+  }
 
   return (
     <>
@@ -377,13 +441,12 @@ export default function AdminPanel() {
             <div className="sidebar-resumen">
               <div className="title">Resumen del mes</div>
               <div className="row">
-                <div>{reservasReporte.length || todasReservas.filter(r => r.fecha?.startsWith(mesReporte)).length} reservas</div>
-                <div>{clubes.filter(c => c.activo).length > 0 ? `${[...new Set(clubes.filter(c => c.activo).map(c => c.motivo))].length} clubes activos` : 'Sin clubes activos'}</div>
+                <div>{todasReservas.filter(r => r.fecha?.startsWith(mesReporte)).length} reservas</div>
+                <div>{[...new Set(clubes.filter(c => c.activo).map(c => c.motivo))].length} clubes activos</div>
               </div>
             </div>
           </aside>
 
-          {/* Main */}
           <main className="admin-main">
 
             {/* ============ TAB BLOQUEOS ============ */}
@@ -394,18 +457,15 @@ export default function AdminPanel() {
                     <div className="kicker">Bloqueos de calendario</div>
                     <h1>Bloquear horas</h1>
                     <p className="subtitle">
-                      Reserva horas para eventos puntuales o usuarios externos. Para clubes recurrentes, usa la pestaña <em>Clubes semanales</em>.
+                      Reserva horas para eventos puntuales. Para clubes recurrentes, usa <em>Clubes semanales</em>.
                     </p>
                   </div>
                 </div>
 
                 <div style={{ display: 'grid', gridTemplateColumns: 'minmax(0, 1.3fr) minmax(0, 1fr)', gap: 20 }} className="bloqueos-grid">
-                  {/* Form */}
                   <div className="card">
                     <div className="flex-between" style={{ marginBottom: 14 }}>
-                      <div className="seccion-titulo" style={{ marginBottom: 0 }}>
-                        Día a bloquear
-                      </div>
+                      <div className="seccion-titulo" style={{ marginBottom: 0 }}>Día a bloquear</div>
                       <input
                         type="date"
                         className="fecha-input"
@@ -455,7 +515,7 @@ export default function AdminPanel() {
                         />
                       </div>
                       <div className="form-grupo" style={{ marginBottom: 0 }}>
-                        <label className="form-label">Tipo de pago</label>
+                        <label className="form-label">Tipo</label>
                         <div className="toggle-row">
                           {[
                             { val: 'gratuito', label: 'Gratuito' },
@@ -495,9 +555,7 @@ export default function AdminPanel() {
                     >
                       <span style={{ display: 'inline-flex', alignItems: 'center', gap: 8 }}>
                         <Icon name="lock" size={14} color="#fff" />
-                        {guardandoBloqueo
-                          ? 'Guardando…'
-                          : `Bloquear ${horasSelBloqueo.length || ''} hora${horasSelBloqueo.length !== 1 ? 's' : ''}`}
+                        {guardandoBloqueo ? 'Guardando…' : `Bloquear ${horasSelBloqueo.length || ''} hora${horasSelBloqueo.length !== 1 ? 's' : ''}`}
                       </span>
                       {!guardandoBloqueo && horasSelBloqueo.length > 0 && (
                         <span style={{ fontSize: '0.78rem', opacity: 0.85 }}>
@@ -507,7 +565,6 @@ export default function AdminPanel() {
                     </button>
                   </div>
 
-                  {/* Right: existing blocks today */}
                   <div className="card">
                     <div className="seccion-titulo">
                       Ocupado el {fechaBloqueo.split('-').reverse().join('/')}
@@ -569,13 +626,13 @@ export default function AdminPanel() {
                     <div className="kicker">Bloqueos recurrentes</div>
                     <h1>Clubes semanales</h1>
                     <p className="subtitle">
-                      Crea horarios fijos que se bloquean automáticamente cada semana. Útil para clubes y talleres.
+                      Gestiona horarios fijos y registra excepciones (sobrebloqueadas, avisos y recuperaciones).
                     </p>
                   </div>
                 </div>
 
                 <div style={{ display: 'grid', gridTemplateColumns: 'minmax(0, 1.1fr) minmax(0, 1fr)', gap: 20 }} className="clubes-grid">
-                  {/* Form */}
+                  {/* Form nuevo club */}
                   <div className="card">
                     <div className="seccion-titulo">Nuevo club</div>
                     <p style={{ color: 'var(--ink-dim)', fontSize: '0.82rem', marginBottom: '1rem', marginTop: '-0.5rem' }}>
@@ -680,13 +737,11 @@ export default function AdminPanel() {
 
                     <button className="btn-verde" onClick={agregarClub} disabled={guardandoClub}>
                       <Icon name="plus" size={14} color="#fff" />
-                      {guardandoClub
-                        ? 'Guardando…'
-                        : `Agregar club ${nuevoClub.motivo ? `— ${nuevoClub.motivo}` : ''} (${diasClub.length} día${diasClub.length > 1 ? 's' : ''})`}
+                      {guardandoClub ? 'Guardando…' : `Agregar club (${diasClub.length} día${diasClub.length > 1 ? 's' : ''})`}
                     </button>
                   </div>
 
-                  {/* List */}
+                  {/* Lista de clubes */}
                   <div>
                     <div className="flex-between" style={{ marginBottom: 12 }}>
                       <div className="seccion-titulo" style={{ marginBottom: 0 }}>Registrados</div>
@@ -785,7 +840,6 @@ export default function AdminPanel() {
                                       ))}
                                     </tbody>
                                   </table>
-
                                 </div>
                               )}
                             </div>
@@ -794,6 +848,165 @@ export default function AdminPanel() {
                       </div>
                     )}
                   </div>
+                </div>
+
+                {/* ---- Sección Excepciones ---- */}
+                <div style={{ marginTop: 28 }}>
+                  <div className="flex-between" style={{ marginBottom: 14 }}>
+                    <div>
+                      <div className="seccion-titulo" style={{ marginBottom: 2 }}>Excepciones de horas</div>
+                      <p style={{ fontSize: '0.82rem', color: 'var(--ink-dim)', margin: 0 }}>
+                        Registra cuando una hora no se usó o se recuperó. Esto afecta el cobro mensual.
+                      </p>
+                    </div>
+                    <button
+                      className="btn-outline"
+                      onClick={() => setMostrarFormExcepcion(!mostrarFormExcepcion)}
+                      style={{ whiteSpace: 'nowrap' }}
+                    >
+                      <Icon name="plus" size={13} />
+                      {mostrarFormExcepcion ? 'Cancelar' : 'Registrar excepción'}
+                    </button>
+                  </div>
+
+                  {mostrarFormExcepcion && (
+                    <div className="card" style={{ marginBottom: 16, background: 'var(--verde-pale)', border: '1px solid var(--border-soft)' }}>
+                      <div className="seccion-titulo" style={{ marginBottom: 16 }}>Nueva excepción</div>
+
+                      {/* Tipo de excepción primero — orienta el resto */}
+                      <div className="form-grupo">
+                        <label className="form-label">¿Qué pasó con esta hora?</label>
+                        <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+                          {Object.entries(TIPO_EXCEPCION).map(([val, info]) => (
+                            <label
+                              key={val}
+                              style={{
+                                display: 'flex', alignItems: 'flex-start', gap: 10, cursor: 'pointer',
+                                padding: '10px 14px', borderRadius: 9,
+                                background: nuevaExcepcion.tipo === val ? 'white' : 'transparent',
+                                border: `1.5px solid ${nuevaExcepcion.tipo === val ? 'var(--verde)' : 'var(--border-soft)'}`,
+                              }}
+                            >
+                              <input
+                                type="radio"
+                                name="tipo_excepcion"
+                                value={val}
+                                checked={nuevaExcepcion.tipo === val}
+                                onChange={() => setNuevaExcepcion(p => ({ ...p, tipo: val }))}
+                                style={{ marginTop: 2 }}
+                              />
+                              <div>
+                                <div style={{ fontWeight: 600, fontSize: '0.86rem', color: 'var(--ink)' }}>{info.label}</div>
+                                <div style={{ fontSize: '0.78rem', color: 'var(--ink-dim)', marginTop: 2 }}>{info.desc}</div>
+                              </div>
+                            </label>
+                          ))}
+                        </div>
+                      </div>
+
+                      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(160px, 1fr))', gap: 12 }}>
+                        <div className="form-grupo" style={{ marginBottom: 0 }}>
+                          <label className="form-label">Club</label>
+                          <select
+                            className="form-input"
+                            value={nuevaExcepcion.nombre_club}
+                            onChange={e => setNuevaExcepcion(p => ({ ...p, nombre_club: e.target.value }))}
+                          >
+                            <option value="">Seleccionar…</option>
+                            {nombresClubs.map(n => <option key={n} value={n}>{n}</option>)}
+                          </select>
+                        </div>
+                        <div className="form-grupo" style={{ marginBottom: 0 }}>
+                          <label className="form-label">Fecha</label>
+                          <input
+                            className="form-input"
+                            type="date"
+                            value={nuevaExcepcion.fecha}
+                            onChange={e => setNuevaExcepcion(p => ({ ...p, fecha: e.target.value }))}
+                          />
+                        </div>
+                        <div className="form-grupo" style={{ marginBottom: 0 }}>
+                          <label className="form-label">Hora</label>
+                          <select
+                            className="form-input"
+                            value={nuevaExcepcion.hora}
+                            onChange={e => setNuevaExcepcion(p => ({ ...p, hora: parseInt(e.target.value) }))}
+                          >
+                            {HORAS.map(h => <option key={h} value={h}>{formatHora(h)}</option>)}
+                          </select>
+                        </div>
+                      </div>
+
+                      {nuevaExcepcion.tipo === 'aviso_anticipado' && (
+                        <label style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 12, cursor: 'pointer', fontSize: '0.86rem', color: 'var(--ink)' }}>
+                          <input
+                            type="checkbox"
+                            checked={nuevaExcepcion.liberar_hora}
+                            onChange={e => setNuevaExcepcion(p => ({ ...p, liberar_hora: e.target.checked }))}
+                          />
+                          Liberar esta hora para que vecinos puedan arrendarla
+                        </label>
+                      )}
+
+                      <div className="form-grupo" style={{ marginTop: 12 }}>
+                        <label className="form-label">Notas (opcional)</label>
+                        <input
+                          className="form-input"
+                          placeholder="Ej: Avisaron el lunes anterior"
+                          value={nuevaExcepcion.notas}
+                          onChange={e => setNuevaExcepcion(p => ({ ...p, notas: e.target.value }))}
+                        />
+                      </div>
+
+                      <button className="btn-verde" onClick={guardarExcepcion} disabled={guardandoExcepcion} style={{ marginTop: 4 }}>
+                        {guardandoExcepcion ? 'Guardando…' : 'Guardar excepción'}
+                      </button>
+                    </div>
+                  )}
+
+                  {/* Lista de excepciones */}
+                  {excepcionesGuardadas.length === 0 ? (
+                    <div style={{ textAlign: 'center', padding: '2rem', color: 'var(--ink-dim)', fontSize: '0.88rem', background: 'var(--card)', borderRadius: 12, border: '1px solid var(--border-soft)' }}>
+                      No hay excepciones registradas aún.
+                    </div>
+                  ) : (
+                    <div className="card" style={{ padding: 0, overflow: 'hidden' }}>
+                      <table className="tabla">
+                        <thead>
+                          <tr>
+                            <th style={{ paddingLeft: 20 }}>Club</th>
+                            <th>Fecha</th>
+                            <th>Hora</th>
+                            <th>Tipo</th>
+                            <th>Notas</th>
+                            <th style={{ paddingRight: 20, textAlign: 'right' }}>Acción</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {excepcionesGuardadas.map(e => (
+                            <tr key={e.id}>
+                              <td style={{ paddingLeft: 20 }}><strong>{e.nombre_club}</strong></td>
+                              <td className="num-strong">{formatFechaCorta(e.fecha)}</td>
+                              <td className="num-strong">{formatHora(e.hora)}</td>
+                              <td>
+                                <span className={`badge ${TIPO_EXCEPCION[e.tipo]?.color || 'badge-gris'}`}>
+                                  <span className="dot"></span>
+                                  {TIPO_EXCEPCION[e.tipo]?.label || e.tipo}
+                                </span>
+                                {e.liberar_hora && (
+                                  <span style={{ fontSize: '0.72rem', color: 'var(--verde)', marginLeft: 6 }}>hora liberada</span>
+                                )}
+                              </td>
+                              <td className="text-dim" style={{ fontSize: '0.8rem' }}>{e.notas || '—'}</td>
+                              <td style={{ paddingRight: 20, textAlign: 'right' }}>
+                                <button className="link-action danger" onClick={() => eliminarExcepcion(e.id)}>Eliminar</button>
+                              </td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                  )}
                 </div>
               </>
             )}
@@ -805,7 +1018,7 @@ export default function AdminPanel() {
                   <div>
                     <div className="kicker">Estado financiero del mes</div>
                     <h1>Reporte mensual</h1>
-                    <p className="subtitle">Resumen de ingresos por reservas y clubes.</p>
+                    <p className="subtitle">Ingresos por reservas, horas de clubes y excepciones registradas.</p>
                   </div>
                   <div style={{ display: 'flex', gap: 8, alignItems: 'flex-end', flexWrap: 'wrap' }}>
                     <input
@@ -819,7 +1032,7 @@ export default function AdminPanel() {
                       <Icon name="search" size={13} />
                       {cargandoReporte ? 'Cargando…' : 'Cargar'}
                     </button>
-                    {(reservasReporte.length > 0 || bloqueosReporte.length > 0) && (
+                    {(reservasReporte.length > 0 || clubesSemanales.length > 0) && (
                       <button className="btn-outline" onClick={descargarExcel} style={{ borderColor: 'var(--verde)', color: 'var(--verde)' }}>
                         <Icon name="download" size={13} />
                         Descargar Excel
@@ -828,35 +1041,185 @@ export default function AdminPanel() {
                   </div>
                 </div>
 
-                {(reservasReporte.length > 0 || bloqueosReporte.length > 0) && (
+                {(reservasReporte.length > 0 || bloqueosReporte.length > 0 || clubesSemanales.length > 0) ? (
                   <>
+                    {/* Stats */}
                     <div className="stats-row">
                       <div className="stat-card verde">
-                        <div className="label">Reservas pagadas</div>
+                        <div className="label">Reservas vecinos</div>
                         <div className="value">{reservasReporte.length}</div>
-                        <div className="sub">${totalReservas.toLocaleString('es-CL')} recaudados</div>
+                        <div className="sub">${totalReservas.toLocaleString('es-CL')}</div>
                       </div>
                       <div className="stat-card amber">
-                        <div className="label">Horas bloqueadas</div>
-                        <div className="value">{bloqueosReporte.length}</div>
-                        <div className="sub">{bloqueosReporte.filter(b => b.tipo === 'gratuito').length} gratuitas</div>
+                        <div className="label">Excepciones registradas</div>
+                        <div className="value">{excepcionesReporte.length}</div>
+                        <div className="sub">{excepcionesReporte.filter(e => e.tipo === 'sobrebloqueada').length} sobrebloqueadas</div>
                       </div>
                       <div className="stat-card accent">
-                        <div className="label">Clubes pagados</div>
-                        <div className="value">${totalBloqueosPagados.toLocaleString('es-CL')}</div>
-                        <div className="sub">{bloqueosReporte.filter(b => b.tipo === 'pagado').length} bloqueos</div>
+                        <div className="label">Clubes activos</div>
+                        <div className="value">{[...new Set(clubesSemanales.map(c => c.motivo))].length}</div>
+                        <div className="sub">{clubesSemanales.filter(c => c.tipo === 'pagado').length > 0 ? 'con pago mensual' : 'todos convenio'}</div>
                       </div>
                       <div className="stat-card">
-                        <div className="label">Ingresos totales</div>
+                        <div className="label">Total ingresos</div>
                         <div className="value">${(totalReservas + totalBloqueosPagados).toLocaleString('es-CL')}</div>
-                        <div className="sub">reservas + pagados</div>
+                        <div className="sub">reservas + clubes</div>
                       </div>
                     </div>
 
+                    {/* Tabla clubes con excepciones */}
+                    {clubesSemanales.length > 0 && (() => {
+                      const clubsAgrupados = clubesSemanales.reduce((acc, b) => {
+                        if (!acc[b.motivo]) acc[b.motivo] = []
+                        acc[b.motivo].push(b)
+                        return acc
+                      }, {})
+
+                      return (
+                        <div className="card" style={{ padding: 0, overflow: 'hidden', marginBottom: 20 }}>
+                          <div style={{ padding: '16px 22px', borderBottom: '1px solid var(--border-soft)', display: 'flex', justifyContent: 'space-between', alignItems: 'baseline' }}>
+                            <div className="seccion-titulo" style={{ marginBottom: 0 }}>Horas de clubes</div>
+                            <div style={{ fontSize: '0.78rem', color: 'var(--ink-dim)' }}>con descuentos y recuperaciones aplicados</div>
+                          </div>
+                          <div style={{ overflowX: 'auto' }}>
+                            <table className="tabla">
+                              <thead>
+                                <tr>
+                                  <th style={{ paddingLeft: 22 }}>Club</th>
+                                  <th>Programadas</th>
+                                  <th>Sobrebloq.</th>
+                                  <th>Con aviso</th>
+                                  <th>Recuperadas</th>
+                                  <th>A cobrar</th>
+                                  <th>Monto</th>
+                                  <th style={{ paddingRight: 22 }}>Estado pago</th>
+                                </tr>
+                              </thead>
+                              <tbody>
+                                {Object.entries(clubsAgrupados).map(([nombre, dias]) => {
+                                  const r = calcularResumenClub(nombre, dias)
+                                  const pagoRegistrado = pagosClubs.find(p => p.nombre_club === nombre)
+                                  return (
+                                    <tr key={nombre}>
+                                      <td style={{ paddingLeft: 22 }}><strong>{nombre}</strong></td>
+                                      <td className="num-strong">{r.horasProgramadas} hrs</td>
+                                      <td>
+                                        {r.horasSobrebloqueadas > 0
+                                          ? <span style={{ color: 'var(--danger)', fontWeight: 600 }}>-{r.horasSobrebloqueadas} hrs</span>
+                                          : <span className="text-dim">—</span>}
+                                      </td>
+                                      <td>
+                                        {r.horasConAviso > 0
+                                          ? <span style={{ color: '#d97706', fontWeight: 600 }}>-{r.horasConAviso} hrs</span>
+                                          : <span className="text-dim">—</span>}
+                                      </td>
+                                      <td>
+                                        {r.horasRecuperadas > 0
+                                          ? <span style={{ color: 'var(--verde)', fontWeight: 600 }}>+{r.horasRecuperadas} hrs</span>
+                                          : <span className="text-dim">—</span>}
+                                      </td>
+                                      <td className="num-strong">{r.horasACobrar} hrs</td>
+                                      <td style={{ color: 'var(--verde)', fontWeight: 600 }}>
+                                        {r.montoTotal > 0 ? `$${r.montoTotal.toLocaleString('es-CL')}` : 'Gratuito'}
+                                      </td>
+                                      <td style={{ paddingRight: 22 }}>
+                                        {r.montoTotal === 0 ? (
+                                          <span className="badge badge-amarillo"><span className="dot"></span>Convenio</span>
+                                        ) : pagoRegistrado ? (
+                                          <span className="badge badge-verde"><span className="dot"></span>Pagado {pagoRegistrado.fecha_pago.split('-').reverse().join('/')}</span>
+                                        ) : (
+                                          <span className="badge badge-rojo"><span className="dot"></span>Pendiente</span>
+                                        )}
+                                      </td>
+                                    </tr>
+                                  )
+                                })}
+                              </tbody>
+                            </table>
+                          </div>
+
+                          {/* Excepciones del mes */}
+                          {excepcionesReporte.length > 0 && (
+                            <div style={{ padding: '16px 22px', borderTop: '1px solid var(--border-soft)' }}>
+                              <div style={{ fontSize: '0.82rem', fontWeight: 600, color: 'var(--ink)', marginBottom: 10 }}>
+                                Excepciones registradas este mes:
+                              </div>
+                              <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+                                {excepcionesReporte.map(e => (
+                                  <div key={e.id} style={{ display: 'flex', alignItems: 'center', gap: 10, fontSize: '0.82rem' }}>
+                                    <span className={`badge ${TIPO_EXCEPCION[e.tipo]?.color || 'badge-gris'}`} style={{ fontSize: '0.72rem' }}>
+                                      <span className="dot"></span>{TIPO_EXCEPCION[e.tipo]?.label}
+                                    </span>
+                                    <span><strong>{e.nombre_club}</strong></span>
+                                    <span className="text-dim">{formatFechaCorta(e.fecha)} {formatHora(e.hora)}</span>
+                                    {e.notas && <span className="text-dim">— {e.notas}</span>}
+                                    {e.liberar_hora && <span style={{ color: 'var(--verde)', fontSize: '0.72rem' }}>· hora liberada</span>}
+                                  </div>
+                                ))}
+                              </div>
+                            </div>
+                          )}
+
+                          {/* Registrar pago */}
+                          <div style={{ padding: '16px 22px', borderTop: '1px solid var(--border-soft)', background: 'var(--verde-pale)' }}>
+                            <div className="seccion-titulo" style={{ marginBottom: 12 }}>
+                              <Icon name="wallet" size={15} />
+                              Registrar pago de club
+                            </div>
+                            <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap', alignItems: 'flex-end' }}>
+                              <div style={{ minWidth: 180 }}>
+                                <label className="form-label">Club</label>
+                                <select className="form-input" value={nuevoPago.nombre_club} onChange={e => setNuevoPago(p => ({ ...p, nombre_club: e.target.value }))}>
+                                  <option value="">Seleccionar…</option>
+                                  {Object.keys(clubesSemanales.reduce((acc, b) => { acc[b.motivo] = true; return acc }, {})).map(n => <option key={n} value={n}>{n}</option>)}
+                                </select>
+                              </div>
+                              <div style={{ width: 140 }}>
+                                <label className="form-label">Monto ($)</label>
+                                <input className="form-input" type="number" placeholder="Ej: 80000" value={nuevoPago.monto_pagado} onChange={e => setNuevoPago(p => ({ ...p, monto_pagado: e.target.value }))} />
+                              </div>
+                              <div style={{ width: 150 }}>
+                                <label className="form-label">Fecha</label>
+                                <input className="form-input" type="date" value={nuevoPago.fecha_pago} onChange={e => setNuevoPago(p => ({ ...p, fecha_pago: e.target.value }))} />
+                              </div>
+                              <div style={{ flex: 1, minWidth: 180 }}>
+                                <label className="form-label">Notas (opcional)</label>
+                                <input className="form-input" placeholder="Ej: Pagó por transferencia" value={nuevoPago.notas} onChange={e => setNuevoPago(p => ({ ...p, notas: e.target.value }))} />
+                              </div>
+                              <button className="btn-verde" style={{ width: 'auto', padding: '11px 20px' }} onClick={registrarPago} disabled={guardandoPago}>
+                                {guardandoPago ? 'Guardando…' : 'Registrar pago'}
+                              </button>
+                            </div>
+
+                            {pagosClubs.length > 0 && (
+                              <div style={{ marginTop: '1rem' }}>
+                                <div style={{ fontSize: '0.78rem', fontWeight: 600, color: 'var(--verde)', marginBottom: 6 }}>
+                                  Pagos registrados este mes:
+                                </div>
+                                {pagosClubs.map(p => (
+                                  <div key={p.id} style={{
+                                    display: 'flex', justifyContent: 'space-between', alignItems: 'center',
+                                    padding: '6px 0', borderBottom: '1px solid #dcfce7', fontSize: '0.82rem'
+                                  }}>
+                                    <span>
+                                      <strong>{p.nombre_club}</strong> — ${p.monto_pagado.toLocaleString('es-CL')} —{' '}
+                                      {p.fecha_pago.split('-').reverse().join('/')}{p.notas ? ` — ${p.notas}` : ''}
+                                    </span>
+                                    <button className="link-action danger" onClick={() => eliminarPago(p.id)}>Eliminar</button>
+                                  </div>
+                                ))}
+                              </div>
+                            )}
+                          </div>
+                        </div>
+                      )
+                    })()}
+
+                    {/* Tabla reservas vecinos */}
                     {reservasReporte.length > 0 && (
                       <div className="card" style={{ padding: 0, overflow: 'hidden' }}>
                         <div style={{ padding: '16px 22px', borderBottom: '1px solid var(--border-soft)', display: 'flex', justifyContent: 'space-between', alignItems: 'baseline' }}>
-                          <div className="seccion-titulo" style={{ marginBottom: 0 }}>Reservas del mes</div>
+                          <div className="seccion-titulo" style={{ marginBottom: 0 }}>Reservas de vecinos</div>
                           <div style={{ fontSize: '0.78rem', color: 'var(--ink-dim)' }}>{reservasReporte.length} reservas · ${totalReservas.toLocaleString('es-CL')}</div>
                         </div>
                         <div style={{ overflowX: 'auto' }}>
@@ -894,133 +1257,13 @@ export default function AdminPanel() {
                       </div>
                     )}
                   </>
-                )}
-
-                {clubesSemanales.length > 0 && (() => {
-                  const clubsAgrupados = clubesSemanales.reduce((acc, b) => {
-                    if (!acc[b.motivo]) acc[b.motivo] = []
-                    acc[b.motivo].push(b)
-                    return acc
-                  }, {})
-
-                  return (
-                    <div className="card" style={{ marginTop: 20 }}>
-                      <div className="seccion-titulo">Clubes semanales</div>
-                      <div style={{ overflowX: 'auto', marginBottom: '1rem' }}>
-                        <table className="tabla">
-                          <thead>
-                            <tr>
-                              <th>Club</th>
-                              <th>Días/semana</th>
-                              <th>Usos en el mes</th>
-                              <th>Horas totales</th>
-                              <th>Monto total</th>
-                              <th>Estado pago</th>
-                            </tr>
-                          </thead>
-                          <tbody>
-                            {Object.entries(clubsAgrupados).map(([nombre, dias]) => {
-                              const diasUnicos = [...new Set(dias.map(d => d.dia_semana))]
-                              const usosEnMes = diasUnicos.reduce((s, dia) => {
-                                const mockClub = { dia_semana: dia }
-                                return s + calcularHorasClubEnMes(mockClub, mesReporte)
-                              }, 0)
-                              // Descontar horas bloqueadas manualmente que correspondan a este club
-              const horasBloqClub = bloqueosReporte.filter(b => {
-                const fechaObj = new Date(b.fecha + 'T12:00:00')
-                return diasUnicos.includes(fechaObj.getDay()) && 
-                       dias.some(d => d.dia_semana === fechaObj.getDay() && d.hora_inicio === b.hora)
-              }).length
-              const horasTotales = Math.max(0, usosEnMes * (dias.length / diasUnicos.length) - horasBloqClub)
-                              const precioPorHora = dias[0].monto > 0 ? dias[0].monto : 10000
-                              const montoTotal = dias[0].tipo === 'pagado' ? horasTotales * precioPorHora : 0
-                              const pagoRegistrado = pagosClubs.find(p => p.nombre_club === nombre)
-                              return (
-                                <tr key={nombre}>
-                                  <td><strong>{nombre}</strong></td>
-                                  <td>{diasUnicos.map(d => DIAS[d]).join(', ')}</td>
-                                  <td>{usosEnMes} veces</td>
-                                  <td>{horasTotales} hrs</td>
-                                  <td>{montoTotal > 0 ? `$${montoTotal.toLocaleString('es-CL')}` : 'Gratuito'}</td>
-                                  <td>
-                                    {montoTotal === 0 ? (
-                                      <span className="badge badge-amarillo"><span className="dot"></span>Convenio</span>
-                                    ) : pagoRegistrado ? (
-                                      <span className="badge badge-verde"><span className="dot"></span>Pagado {pagoRegistrado.fecha_pago.split('-').reverse().join('/')}</span>
-                                    ) : (
-                                      <span className="badge badge-rojo"><span className="dot"></span>Pendiente</span>
-                                    )}
-                                  </td>
-                                </tr>
-                              )
-                            })}
-                          </tbody>
-                        </table>
-                      </div>
-
-                      {/* Registrar pago */}
-                      <div style={{
-                        background: 'var(--verde-pale)', border: '1px solid var(--border-soft)',
-                        borderRadius: 12, padding: '1.1rem',
-                      }}>
-                        <div className="seccion-titulo" style={{ marginBottom: 12 }}>
-                          <Icon name="wallet" size={15} />
-                          Registrar pago de club
-                        </div>
-                        <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap', alignItems: 'flex-end' }}>
-                          <div style={{ minWidth: 180 }}>
-                            <label className="form-label">Club</label>
-                            <select className="form-input" value={nuevoPago.nombre_club} onChange={e => setNuevoPago(p => ({ ...p, nombre_club: e.target.value }))}>
-                              <option value="">Seleccionar…</option>
-                              {Object.keys(clubsAgrupados).map(n => <option key={n} value={n}>{n}</option>)}
-                            </select>
-                          </div>
-                          <div style={{ width: 140 }}>
-                            <label className="form-label">Monto ($)</label>
-                            <input className="form-input" type="number" placeholder="Ej: 80000" value={nuevoPago.monto_pagado} onChange={e => setNuevoPago(p => ({ ...p, monto_pagado: e.target.value }))} />
-                          </div>
-                          <div style={{ width: 150 }}>
-                            <label className="form-label">Fecha</label>
-                            <input className="form-input" type="date" value={nuevoPago.fecha_pago} onChange={e => setNuevoPago(p => ({ ...p, fecha_pago: e.target.value }))} />
-                          </div>
-                          <div style={{ flex: 1, minWidth: 180 }}>
-                            <label className="form-label">Notas (opcional)</label>
-                            <input className="form-input" placeholder="Ej: Pagó con transferencia" value={nuevoPago.notas} onChange={e => setNuevoPago(p => ({ ...p, notas: e.target.value }))} />
-                          </div>
-                          <button className="btn-verde" style={{ width: 'auto', padding: '11px 20px' }} onClick={registrarPago} disabled={guardandoPago}>
-                            {guardandoPago ? 'Guardando…' : 'Registrar pago'}
-                          </button>
-                        </div>
-
-                        {pagosClubs.length > 0 && (
-                          <div style={{ marginTop: '1rem' }}>
-                            <div style={{ fontSize: '0.78rem', fontWeight: 600, color: 'var(--verde)', marginBottom: 6 }}>
-                              Pagos registrados este mes:
-                            </div>
-                            {pagosClubs.map(p => (
-                              <div key={p.id} style={{
-                                display: 'flex', justifyContent: 'space-between', alignItems: 'center',
-                                padding: '6px 0', borderBottom: '1px solid #dcfce7', fontSize: '0.82rem'
-                              }}>
-                                <span>
-                                  <strong>{p.nombre_club}</strong> — ${p.monto_pagado.toLocaleString('es-CL')} —{' '}
-                                  {p.fecha_pago.split('-').reverse().join('/')}{p.notas ? ` — ${p.notas}` : ''}
-                                </span>
-                                <button className="link-action danger" onClick={() => eliminarPago(p.id)}>Eliminar</button>
-                              </div>
-                            ))}
-                          </div>
-                        )}
-                      </div>
+                ) : (
+                  !cargandoReporte && (
+                    <div className="card" style={{ textAlign: 'center', padding: '3rem 1rem', color: 'var(--ink-dim)' }}>
+                      <Icon name="chart" size={32} color="var(--ink-soft)" />
+                      <p style={{ marginTop: 12, fontSize: '0.9rem' }}>Selecciona un mes y presiona "Cargar" para ver el reporte.</p>
                     </div>
                   )
-                })()}
-
-                {reservasReporte.length === 0 && bloqueosReporte.length === 0 && clubesSemanales.length === 0 && !cargandoReporte && (
-                  <div className="card" style={{ textAlign: 'center', padding: '3rem 1rem', color: 'var(--ink-dim)' }}>
-                    <Icon name="chart" size={32} color="var(--ink-soft)" />
-                    <p style={{ marginTop: 12, fontSize: '0.9rem' }}>Selecciona un mes y presiona "Cargar" para ver el reporte.</p>
-                  </div>
                 )}
               </>
             )}
@@ -1045,7 +1288,6 @@ export default function AdminPanel() {
                   </div>
                 </div>
 
-                {/* Filter chips */}
                 <div style={{ display: 'flex', gap: 8, marginBottom: 20, flexWrap: 'wrap' }}>
                   {[
                     { id: 'todas', label: 'Todas', count: todasReservas.length },
@@ -1139,10 +1381,8 @@ export default function AdminPanel() {
                 </div>
 
                 <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(320px, 1fr))', gap: 20, maxWidth: 880 }}>
-                  {/* Profile */}
                   <div className="card">
                     <div className="seccion-titulo">Tu perfil</div>
-
                     <div style={{ display: 'flex', alignItems: 'center', gap: 14, marginBottom: 20 }}>
                       <div style={{
                         width: 62, height: 62, borderRadius: 999,
@@ -1161,7 +1401,6 @@ export default function AdminPanel() {
                         </div>
                       </div>
                     </div>
-
                     <div className="exito-note">
                       <span className="icon"><Icon name="lock" size={16} color="var(--accent)" /></span>
                       <div>
@@ -1172,13 +1411,11 @@ export default function AdminPanel() {
                     </div>
                   </div>
 
-                  {/* Password */}
                   <div className="card">
                     <div className="seccion-titulo">Cambiar contraseña</div>
                     <p style={{ fontSize: '0.82rem', color: 'var(--ink-dim)', marginBottom: 18, marginTop: '-0.5rem' }}>
                       Mínimo 8 caracteres. Recomendado: mezcla letras y números.
                     </p>
-
                     <div className="form-grupo">
                       <label className="form-label">Contraseña actual</label>
                       <input className="form-input" type="password" value={passActual} onChange={e => setPassActual(e.target.value)} placeholder="••••••••" />
@@ -1191,7 +1428,6 @@ export default function AdminPanel() {
                       <label className="form-label">Confirmar nueva contraseña</label>
                       <input className="form-input" type="password" value={passConfirm} onChange={e => setPassConfirm(e.target.value)} placeholder="Repite la nueva contraseña" />
                     </div>
-
                     {msgPass && (
                       <div style={{
                         padding: '10px 14px', borderRadius: 9, marginBottom: '1rem',
@@ -1203,7 +1439,6 @@ export default function AdminPanel() {
                         {msgPass}
                       </div>
                     )}
-
                     <button className="btn-verde" onClick={cambiarContrasena}>Actualizar contraseña</button>
                   </div>
                 </div>
@@ -1214,7 +1449,6 @@ export default function AdminPanel() {
         </div>
       </div>
 
-      {/* Responsive grid fixes */}
       <style jsx>{`
         @media (max-width: 900px) {
           :global(.bloqueos-grid),
