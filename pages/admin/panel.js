@@ -44,6 +44,7 @@ export default function AdminPanel() {
   const [horasBloqueadas, setHorasBloqueadas] = useState([])
   const [bloqueoActual, setBloqueoActual] = useState([])
   const [guardandoBloqueo, setGuardandoBloqueo] = useState(false)
+  const [clubBloqueo, setClubBloqueo] = useState('')
 
   // Clubes semanales
   const [clubes, setClubes] = useState([])
@@ -242,23 +243,51 @@ export default function AdminPanel() {
 
   async function guardarBloqueos() {
     if (horasSelBloqueo.length === 0) return alert('Selecciona al menos una hora')
-    if (!motivoBloqueo.trim()) return alert('Escribe el motivo del bloqueo')
-    if (tipoBloqueo === 'pagado' && !montoBloqueo) return alert('Escribe el monto')
+    if (!motivoBloqueo.trim() && tipoBloqueo !== 'hora_extra_club' && tipoBloqueo !== 'recuperacion_club') return alert('Escribe el motivo del bloqueo')
+    if (tipoBloqueo === 'pagado' && !montoBloqueo) return alert('Escribe el monto por hora')
+    if ((tipoBloqueo === 'hora_extra_club' || tipoBloqueo === 'recuperacion_club') && !clubBloqueo) return alert('Selecciona el club')
     setGuardandoBloqueo(true)
+
+    // Determinar tipo real para la tabla bloqueos
+    const tipoReal = tipoBloqueo === 'hora_extra_club' ? 'pagado' : tipoBloqueo === 'recuperacion_club' ? 'pagado' : tipoBloqueo
+    const motivoReal = tipoBloqueo === 'hora_extra_club'
+      ? `Hora extra — ${clubBloqueo}`
+      : tipoBloqueo === 'recuperacion_club'
+      ? `Recuperación — ${clubBloqueo}`
+      : motivoBloqueo.trim()
+
     const bloqueos = horasSelBloqueo.map(hora => ({
       fecha: fechaBloqueo, hora,
-      motivo: motivoBloqueo.trim(),
-      tipo: tipoBloqueo,
-      monto: tipoBloqueo === 'pagado' ? parseInt(montoBloqueo) : 0,
+      motivo: motivoReal,
+      tipo: tipoReal,
+      monto: tipoBloqueo === 'pagado' ? parseInt(montoBloqueo) : tipoBloqueo === 'hora_extra_club' || tipoBloqueo === 'recuperacion_club' ? parseInt(montoBloqueo) || 10000 : 0,
       bloqueado_por: admin.email,
       indefinido: false
     }))
     const { error } = await supabase.from('bloqueos').insert(bloqueos)
-    if (error) alert('Error: ' + error.message)
-    else { alert('✓ Horas bloqueadas'); await cargarHorasBloqueo() }
+    if (error) { alert('Error: ' + error.message); setGuardandoBloqueo(false); return }
+
+    // Registrar excepción automáticamente para hora_extra_club y recuperacion_club
+    if (tipoBloqueo === 'hora_extra_club' || tipoBloqueo === 'recuperacion_club') {
+      const tipoExc = tipoBloqueo === 'hora_extra_club' ? 'hora_extra' : 'recuperacion'
+      const excepciones = horasSelBloqueo.map(hora => ({
+        nombre_club: clubBloqueo,
+        fecha: fechaBloqueo,
+        hora,
+        tipo: tipoExc,
+        liberar_hora: false,
+        notas: tipoBloqueo === 'hora_extra_club' ? 'Hora extra registrada desde bloqueos' : 'Recuperación registrada desde bloqueos',
+        registrado_por: admin.email
+      }))
+      await supabase.from('excepciones_clubes').insert(excepciones)
+    }
+
+    alert('✓ Horas bloqueadas')
+    await cargarHorasBloqueo()
     setHorasSelBloqueo([])
     setMotivoBloqueo('')
     setMontoBloqueo('')
+    setClubBloqueo('')
     setGuardandoBloqueo(false)
   }
 
@@ -373,19 +402,21 @@ export default function AdminPanel() {
     const horasSobrebloqueadas = excClub.filter(e => e.tipo === 'sobrebloqueada').length
     const horasConAviso = excClub.filter(e => e.tipo === 'aviso_anticipado').length
     const horasRecuperadas = excClub.filter(e => e.tipo === 'recuperacion').length
+    const horasExtra = excClub.filter(e => e.tipo === 'hora_extra').length
 
-    // Horas a cobrar = programadas - sobrebloqueadas - con aviso + recuperadas
-    const horasACobrar = Math.max(0, horasProgramadas - horasSobrebloqueadas - horasConAviso + horasRecuperadas)
+    // Horas a cobrar = programadas - sobrebloqueadas - con aviso + recuperadas + extra
+    const horasACobrar = Math.max(0, horasProgramadas - horasSobrebloqueadas - horasConAviso + horasRecuperadas + horasExtra)
     const precioPorHora = diasClub[0].monto > 0 ? diasClub[0].monto : 10000
     const montoTotal = diasClub[0].tipo === 'pagado' ? horasACobrar * precioPorHora : 0
 
-    return { horasProgramadas, horasSobrebloqueadas, horasConAviso, horasRecuperadas, horasACobrar, montoTotal, precioPorHora }
+    return { horasProgramadas, horasSobrebloqueadas, horasConAviso, horasRecuperadas, horasExtra, horasACobrar, montoTotal, precioPorHora }
   }
 
   const TIPO_EXCEPCION = {
     sobrebloqueada: { label: 'Sobrebloqueada', color: 'badge-rojo', desc: 'La directiva bloqueó esta hora — no se cobra' },
     aviso_anticipado: { label: 'Avisaron con anticipación', color: 'badge-amarillo', desc: 'El club avisó que no vendría — no se cobra' },
-    recuperacion: { label: 'Recuperación de hora', color: 'badge-verde', desc: 'El club recuperó una hora perdida — se cobra' },
+    recuperacion: { label: 'Recuperación de hora', color: 'badge-verde', desc: 'El club recuperó una hora sobrebloqueada — se cobra' },
+    hora_extra: { label: 'Hora extra', color: 'badge-azul', desc: 'El club usó una hora fuera de su horario — se suma al cobro' },
   }
 
   return (
@@ -504,7 +535,8 @@ export default function AdminPanel() {
                       </div>
                     </div>
 
-                    <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
+                    <div style={{ display: 'grid', gridTemplateColumns: tipoBloqueo === 'gratuito' || tipoBloqueo === 'pagado' ? '1fr 1fr' : '1fr', gap: 12 }}>
+                      {(tipoBloqueo === 'gratuito' || tipoBloqueo === 'pagado') && (
                       <div className="form-grupo" style={{ marginBottom: 0 }}>
                         <label className="form-label">Motivo</label>
                         <input
@@ -514,12 +546,15 @@ export default function AdminPanel() {
                           onChange={e => setMotivoBloqueo(e.target.value)}
                         />
                       </div>
+                      )}
                       <div className="form-grupo" style={{ marginBottom: 0 }}>
                         <label className="form-label">Tipo</label>
-                        <div className="toggle-row">
+                        <div className="toggle-row" style={{ flexWrap: 'wrap' }}>
                           {[
                             { val: 'gratuito', label: 'Gratuito' },
                             { val: 'pagado', label: 'Pagado' },
+                            { val: 'hora_extra_club', label: 'Hora extra club' },
+                            { val: 'recuperacion_club', label: 'Recuperación club' },
                           ].map(opt => (
                             <button
                               key={opt.val}
@@ -531,12 +566,29 @@ export default function AdminPanel() {
                             </button>
                           ))}
                         </div>
+                        {tipoBloqueo === 'hora_extra_club' && (
+                          <p style={{ fontSize: '0.76rem', color: 'var(--ink-dim)', marginTop: 6 }}>
+                            El club usó una hora fuera de su horario habitual. Se suma al cobro mensual.
+                          </p>
+                        )}
+                        {tipoBloqueo === 'recuperacion_club' && (
+                          <p style={{ fontSize: '0.76rem', color: 'var(--ink-dim)', marginTop: 6 }}>
+                            El club recupera una hora que le fue sobrebloqueada. Se reintegra al cobro mensual.
+                          </p>
+                        )}
                       </div>
                     </div>
 
-                    {tipoBloqueo === 'pagado' && (
+                    {(tipoBloqueo === 'pagado' || tipoBloqueo === 'hora_extra_club' || tipoBloqueo === 'recuperacion_club') && (
                       <div className="form-grupo" style={{ marginTop: 12 }}>
-                        <label className="form-label">Monto ($)</label>
+                        <label className="form-label">
+                          Monto por hora ($)
+                          {horasSelBloqueo.length > 1 && montoBloqueo && (
+                            <span style={{ color: 'var(--verde)', fontWeight: 600, marginLeft: 8 }}>
+                              Total: ${(parseInt(montoBloqueo) * horasSelBloqueo.length).toLocaleString('es-CL')}
+                            </span>
+                          )}
+                        </label>
                         <input
                           className="form-input"
                           type="number"
@@ -544,6 +596,20 @@ export default function AdminPanel() {
                           value={montoBloqueo}
                           onChange={e => setMontoBloqueo(e.target.value)}
                         />
+                      </div>
+                    )}
+
+                    {(tipoBloqueo === 'hora_extra_club' || tipoBloqueo === 'recuperacion_club') && (
+                      <div className="form-grupo" style={{ marginTop: 12 }}>
+                        <label className="form-label">Club</label>
+                        <select
+                          className="form-input"
+                          value={clubBloqueo}
+                          onChange={e => setClubBloqueo(e.target.value)}
+                        >
+                          <option value="">Seleccionar club…</option>
+                          {nombresClubs.map(n => <option key={n} value={n}>{n}</option>)}
+                        </select>
                       </div>
                     )}
 
@@ -850,167 +916,8 @@ export default function AdminPanel() {
                   </div>
                 </div>
 
-                {/* ---- Sección Excepciones ---- */}
-                <div style={{ marginTop: 28 }}>
-                  <div className="flex-between" style={{ marginBottom: 14 }}>
-                    <div>
-                      <div className="seccion-titulo" style={{ marginBottom: 2 }}>Excepciones de horas</div>
-                      <p style={{ fontSize: '0.82rem', color: 'var(--ink-dim)', margin: 0 }}>
-                        Registra cuando una hora no se usó o se recuperó. Esto afecta el cobro mensual.
-                      </p>
-                    </div>
-                    <button
-                      className="btn-outline"
-                      onClick={() => setMostrarFormExcepcion(!mostrarFormExcepcion)}
-                      style={{ whiteSpace: 'nowrap' }}
-                    >
-                      <Icon name="plus" size={13} />
-                      {mostrarFormExcepcion ? 'Cancelar' : 'Registrar excepción'}
-                    </button>
-                  </div>
-
-                  {mostrarFormExcepcion && (
-                    <div className="card" style={{ marginBottom: 16, background: 'var(--verde-pale)', border: '1px solid var(--border-soft)' }}>
-                      <div className="seccion-titulo" style={{ marginBottom: 16 }}>Nueva excepción</div>
-
-                      {/* Tipo de excepción primero — orienta el resto */}
-                      <div className="form-grupo">
-                        <label className="form-label">¿Qué pasó con esta hora?</label>
-                        <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-                          {Object.entries(TIPO_EXCEPCION).map(([val, info]) => (
-                            <label
-                              key={val}
-                              style={{
-                                display: 'flex', alignItems: 'flex-start', gap: 10, cursor: 'pointer',
-                                padding: '10px 14px', borderRadius: 9,
-                                background: nuevaExcepcion.tipo === val ? 'white' : 'transparent',
-                                border: `1.5px solid ${nuevaExcepcion.tipo === val ? 'var(--verde)' : 'var(--border-soft)'}`,
-                              }}
-                            >
-                              <input
-                                type="radio"
-                                name="tipo_excepcion"
-                                value={val}
-                                checked={nuevaExcepcion.tipo === val}
-                                onChange={() => setNuevaExcepcion(p => ({ ...p, tipo: val }))}
-                                style={{ marginTop: 2 }}
-                              />
-                              <div>
-                                <div style={{ fontWeight: 600, fontSize: '0.86rem', color: 'var(--ink)' }}>{info.label}</div>
-                                <div style={{ fontSize: '0.78rem', color: 'var(--ink-dim)', marginTop: 2 }}>{info.desc}</div>
-                              </div>
-                            </label>
-                          ))}
-                        </div>
-                      </div>
-
-                      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(160px, 1fr))', gap: 12 }}>
-                        <div className="form-grupo" style={{ marginBottom: 0 }}>
-                          <label className="form-label">Club</label>
-                          <select
-                            className="form-input"
-                            value={nuevaExcepcion.nombre_club}
-                            onChange={e => setNuevaExcepcion(p => ({ ...p, nombre_club: e.target.value }))}
-                          >
-                            <option value="">Seleccionar…</option>
-                            {nombresClubs.map(n => <option key={n} value={n}>{n}</option>)}
-                          </select>
-                        </div>
-                        <div className="form-grupo" style={{ marginBottom: 0 }}>
-                          <label className="form-label">Fecha</label>
-                          <input
-                            className="form-input"
-                            type="date"
-                            value={nuevaExcepcion.fecha}
-                            onChange={e => setNuevaExcepcion(p => ({ ...p, fecha: e.target.value }))}
-                          />
-                        </div>
-                        <div className="form-grupo" style={{ marginBottom: 0 }}>
-                          <label className="form-label">Hora</label>
-                          <select
-                            className="form-input"
-                            value={nuevaExcepcion.hora}
-                            onChange={e => setNuevaExcepcion(p => ({ ...p, hora: parseInt(e.target.value) }))}
-                          >
-                            {HORAS.map(h => <option key={h} value={h}>{formatHora(h)}</option>)}
-                          </select>
-                        </div>
-                      </div>
-
-                      {nuevaExcepcion.tipo === 'aviso_anticipado' && (
-                        <label style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 12, cursor: 'pointer', fontSize: '0.86rem', color: 'var(--ink)' }}>
-                          <input
-                            type="checkbox"
-                            checked={nuevaExcepcion.liberar_hora}
-                            onChange={e => setNuevaExcepcion(p => ({ ...p, liberar_hora: e.target.checked }))}
-                          />
-                          Liberar esta hora para que vecinos puedan arrendarla
-                        </label>
-                      )}
-
-                      <div className="form-grupo" style={{ marginTop: 12 }}>
-                        <label className="form-label">Notas (opcional)</label>
-                        <input
-                          className="form-input"
-                          placeholder="Ej: Avisaron el lunes anterior"
-                          value={nuevaExcepcion.notas}
-                          onChange={e => setNuevaExcepcion(p => ({ ...p, notas: e.target.value }))}
-                        />
-                      </div>
-
-                      <button className="btn-verde" onClick={guardarExcepcion} disabled={guardandoExcepcion} style={{ marginTop: 4 }}>
-                        {guardandoExcepcion ? 'Guardando…' : 'Guardar excepción'}
-                      </button>
-                    </div>
-                  )}
-
-                  {/* Lista de excepciones */}
-                  {excepcionesGuardadas.length === 0 ? (
-                    <div style={{ textAlign: 'center', padding: '2rem', color: 'var(--ink-dim)', fontSize: '0.88rem', background: 'var(--card)', borderRadius: 12, border: '1px solid var(--border-soft)' }}>
-                      No hay excepciones registradas aún.
-                    </div>
-                  ) : (
-                    <div className="card" style={{ padding: 0, overflow: 'hidden' }}>
-                      <table className="tabla">
-                        <thead>
-                          <tr>
-                            <th style={{ paddingLeft: 20 }}>Club</th>
-                            <th>Fecha</th>
-                            <th>Hora</th>
-                            <th>Tipo</th>
-                            <th>Notas</th>
-                            <th style={{ paddingRight: 20, textAlign: 'right' }}>Acción</th>
-                          </tr>
-                        </thead>
-                        <tbody>
-                          {excepcionesGuardadas.map(e => (
-                            <tr key={e.id}>
-                              <td style={{ paddingLeft: 20 }}><strong>{e.nombre_club}</strong></td>
-                              <td className="num-strong">{formatFechaCorta(e.fecha)}</td>
-                              <td className="num-strong">{formatHora(e.hora)}</td>
-                              <td>
-                                <span className={`badge ${TIPO_EXCEPCION[e.tipo]?.color || 'badge-gris'}`}>
-                                  <span className="dot"></span>
-                                  {TIPO_EXCEPCION[e.tipo]?.label || e.tipo}
-                                </span>
-                                {e.liberar_hora && (
-                                  <span style={{ fontSize: '0.72rem', color: 'var(--verde)', marginLeft: 6 }}>hora liberada</span>
-                                )}
-                              </td>
-                              <td className="text-dim" style={{ fontSize: '0.8rem' }}>{e.notas || '—'}</td>
-                              <td style={{ paddingRight: 20, textAlign: 'right' }}>
-                                <button className="link-action danger" onClick={() => eliminarExcepcion(e.id)}>Eliminar</button>
-                              </td>
-                            </tr>
-                          ))}
-                        </tbody>
-                      </table>
-                    </div>
-                  )}
-                </div>
               </>
             )}
-
             {/* ============ TAB REPORTE ============ */}
             {tab === 'reporte' && (
               <>
@@ -1090,6 +997,7 @@ export default function AdminPanel() {
                                   <th>Sobrebloq.</th>
                                   <th>Con aviso</th>
                                   <th>Recuperadas</th>
+                                  <th>Hora extra</th>
                                   <th>A cobrar</th>
                                   <th>Monto</th>
                                   <th style={{ paddingRight: 22 }}>Estado pago</th>
@@ -1116,6 +1024,11 @@ export default function AdminPanel() {
                                       <td>
                                         {r.horasRecuperadas > 0
                                           ? <span style={{ color: 'var(--verde)', fontWeight: 600 }}>+{r.horasRecuperadas} hrs</span>
+                                          : <span className="text-dim">—</span>}
+                                      </td>
+                                      <td>
+                                        {r.horasExtra > 0
+                                          ? <span style={{ color: '#2563eb', fontWeight: 600 }}>+{r.horasExtra} hrs</span>
                                           : <span className="text-dim">—</span>}
                                       </td>
                                       <td className="num-strong">{r.horasACobrar} hrs</td>
