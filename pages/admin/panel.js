@@ -429,12 +429,13 @@ export default function AdminPanel() {
 
   // Calcular resumen de club para reporte
   function calcularResumenClub(nombre, diasClub) {
-    const diasUnicos = [...new Set(diasClub.map(d => d.dia_semana))]
-    const horasPorSemana = diasClub.length / diasUnicos.length
-
-    // Horas programadas en el mes
-    const horasProgramadas = diasUnicos.reduce((s, dia) => {
-      return s + calcularHorasClubEnMes(dia, mesReporte) * horasPorSemana
+    // Calcular horas programadas: por cada día de la semana, contar cuántas veces cae en el mes × horas de ese día
+    const horasPorDia = diasClub.reduce((acc, b) => {
+      acc[b.dia_semana] = (acc[b.dia_semana] || 0) + 1
+      return acc
+    }, {})
+    const horasProgramadas = Object.entries(horasPorDia).reduce((s, [dia, hrs]) => {
+      return s + calcularHorasClubEnMes(parseInt(dia), mesReporte) * hrs
     }, 0)
 
     const excClub = excepcionesReporte.filter(e => e.nombre_club === nombre)

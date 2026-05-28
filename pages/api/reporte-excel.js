@@ -44,9 +44,9 @@ export default async function handler(req, res) {
 
   let totalClubes = 0
   Object.entries(clubsAgrupados).forEach(([nombre, dias]) => {
-    const diasUnicos = [...new Set(dias.map(d => d.dia_semana))]
-    const horasPorSemana = dias.length / diasUnicos.length
-    const horasProgramadas = diasUnicos.reduce((s, dia) => s + calcularHorasEnMes(dia, mes) * horasPorSemana, 0)
+    const horasPorDia = dias.reduce((acc, b) => { acc[b.dia_semana] = (acc[b.dia_semana] || 0) + 1; return acc }, {})
+    const diasUnicos = Object.keys(horasPorDia).map(Number)
+    const horasProgramadas = diasUnicos.reduce((s, dia) => s + calcularHorasEnMes(dia, mes) * horasPorDia[dia], 0)
     const excClub = excepciones.filter(e => e.nombre_club === nombre)
     const sobrebloqueadas = excClub.filter(e => e.tipo === 'sobrebloqueada').length
     const conAviso = excClub.filter(e => e.tipo === 'aviso_anticipado').length
