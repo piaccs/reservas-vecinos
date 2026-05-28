@@ -131,7 +131,7 @@ export default function Home() {
   function getEstadoHora(hora) {
     const hoy = hoyChile()
     const ahoraH = ahoraChileHour()
-    if (fecha === hoy && hora <= ahoraH + 1) return 'pasada'
+    if (fecha === hoy && hora <= Math.min(ahoraH + 1, 23)) return 'pasada'
     if (horasOcupadas.includes(hora)) return 'ocupada'
     if (horasBloqueadas.includes(hora)) return 'bloqueada'
     return 'libre'
