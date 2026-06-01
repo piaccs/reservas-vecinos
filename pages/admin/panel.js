@@ -233,7 +233,7 @@ export default function AdminPanel() {
     setCargandoReservas(true)
     const { data } = await supabase
       .from('reservas').select('*')
-      .eq('estado', 'confirmada')
+      
       .order('fecha', { ascending: false })
       .order('hora', { ascending: true })
       .limit(200)
