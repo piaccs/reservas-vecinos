@@ -347,7 +347,7 @@ export default function AdminPanel() {
     console.log("Cargando reporte mes:", mesReporte)
     const [year, month] = mesReporte.split('-')
     const inicio = `${year}-${month}-01`
-    const fin = `${year}-${month}-31`
+    const fin = new Date(parseInt(year), parseInt(month), 0).toISOString().split("T")[0]
     const { data: reservas } = await supabase.from('reservas').select('*')
       .gte('fecha', inicio).lte('fecha', fin).eq('estado', 'confirmada').order('fecha').order('hora')
     const { data: bloqueos } = await supabase.from('bloqueos').select('*')
