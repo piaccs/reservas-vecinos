@@ -195,7 +195,7 @@ export default function Home() {
         celular: celular.trim(),
         email_reservante: email.trim(),
         comprobante_url: comprobanteUrl,
-        monto: 10000 * horasSeleccionadas.length,
+        monto: 10000,
         estado: 'pendiente'
       }))
 
