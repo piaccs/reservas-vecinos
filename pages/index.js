@@ -196,7 +196,7 @@ export default function Home() {
         email_reservante: email.trim(),
         comprobante_url: comprobanteUrl,
         monto: 10000 * horasSeleccionadas.length,
-        estado: 'confirmada'
+        estado: 'pendiente'
       }))
 
       const { data: reservaInsertada, error: reservaError } = await supabase
