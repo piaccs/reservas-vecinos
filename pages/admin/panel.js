@@ -1327,13 +1327,13 @@ export default function AdminPanel() {
                         </thead>
                         <tbody>
                           {reservasFiltradas.map(r => {
-                            const esProxima = r.fecha >= hoyChile()
+                            const badgeClass = r.estado === 'confirmada' ? 'badge-verde' : r.estado === 'rechazada' ? 'badge-rojo' : 'badge-amarillo'
                             return (
                               <tr key={r.id}>
                                 <td>
-                                  <span className={`badge ${esProxima ? 'badge-verde' : 'badge-gris'}`}>
+                                  <span className={`badge ${badgeClass}`}>
                                     <span className="dot"></span>
-                                    {esProxima ? 'Próxima' : 'Pasada'}
+                                    {r.estado === 'confirmada' ? 'Confirmada' : r.estado === 'rechazada' ? 'Rechazada' : 'Pendiente'}
                                   </span>
                                 </td>
                                 <td className="num-strong">{formatFechaCorta(r.fecha)}</td>
