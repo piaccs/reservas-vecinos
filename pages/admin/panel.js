@@ -344,6 +344,7 @@ export default function AdminPanel() {
 
   async function cargarReporte() {
     setCargandoReporte(true)
+    console.log("Cargando reporte mes:", mesReporte)
     const [year, month] = mesReporte.split('-')
     const inicio = `${year}-${month}-01`
     const fin = `${year}-${month}-31`
