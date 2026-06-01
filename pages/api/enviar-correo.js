@@ -113,6 +113,9 @@ export default async function handler(req, res) {
   `
 
   try {
+    console.log('Intentando enviar correo con GMAIL_USER:', process.env.GMAIL_USER)
+    console.log('ADMIN_EMAIL:', process.env.ADMIN_EMAIL)
+
     const transporter = nodemailer.createTransport({
       service: 'gmail',
       auth: {
@@ -128,9 +131,10 @@ export default async function handler(req, res) {
       html: htmlBody
     })
 
+    console.log('Correo enviado exitosamente')
     res.status(200).json({ ok: true })
   } catch (error) {
-    console.error('Error enviando correo:', error)
+    console.error('Error enviando correo:', JSON.stringify(error, Object.getOwnPropertyNames(error)))
     res.status(500).json({ ok: false, error: 'Error al enviar notificación' })
   }
 }
