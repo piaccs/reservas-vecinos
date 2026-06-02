@@ -8,12 +8,10 @@ const supabase = createClient(
   process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY
 )
 
-// Elimina cualquier etiqueta HTML del texto para evitar XSS en correos
 function sanitizarLegacy(str) {
   return sanitizar(str)
 }
 
-// 20 confirmaciones por IP cada hora (los admins son 3, esto es más que suficiente)
 const limiter = crearLimiter({ max: 20, ventanaMs: 60 * 60 * 1000 })
 
 export default async function handler(req, res) {
@@ -21,7 +19,6 @@ export default async function handler(req, res) {
 
   const { id, accion } = req.query
 
-  // Validar parámetros de entrada
   const idError = validarUUID(id)
   if (idError) return res.status(400).send('ID de reserva inválido')
   if (!['aceptar', 'rechazar'].includes(accion)) return res.status(400).send('Acción inválida')
@@ -49,7 +46,6 @@ export default async function handler(req, res) {
   const hora = `${reserva.hora.toString().padStart(2,'0')}:00`
   const aceptada = accion === 'aceptar'
 
-  // Sanitizar datos del usuario antes de incluir en HTML
   const nombreSeguro = sanitizarLegacy(reserva.nombre_reservante)
   const emailSeguro = sanitizarLegacy(reserva.email_reservante)
   const montoFormateado = Number(reserva.monto || 10000).toLocaleString('es-CL')
@@ -116,9 +112,13 @@ export default async function handler(req, res) {
       html: htmlVecino
     })
 
+    // Actualizar todas las filas del mismo vecino en la misma fecha
     await supabase.from('reservas').update({
       estado: aceptada ? 'confirmada' : 'rechazada'
-    }).eq('id', id)
+    })
+      .eq('nombre_reservante', reserva.nombre_reservante)
+      .eq('fecha', reserva.fecha)
+      .eq('email_reservante', reserva.email_reservante)
 
     return res.status(200).send(`
       <html>
