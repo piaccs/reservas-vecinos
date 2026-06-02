@@ -400,6 +400,7 @@ export default function AdminPanel() {
   const totalReservas = reservasReporte.reduce((s, r) => s + (r.monto || 10000), 0)
   const totalBloqueosPagados = bloqueosReporte.filter(b => b.tipo === 'pagado').reduce((s, b) => s + (b.monto || 0), 0)
   const totalBloqueosIndividuales = bloqueosReporte.filter(b => b.tipo === 'pagado' && !b.motivo?.startsWith('Hora extra —') && !b.motivo?.startsWith('Recuperación —')).reduce((s, b) => s + (b.monto || 0), 0)
+  const totalPagosClubs = pagosClubs.reduce((s, p) => s + (p.monto_pagado || 0), 0)
 
   const reservasFiltradas = todasReservas.filter(r => {
     const hoy = hoyChile()
@@ -1019,7 +1020,7 @@ export default function AdminPanel() {
                       </div>
                       <div className="stat-card">
                         <div className="label">Total ingresos</div>
-                        <div className="value">${(totalReservas + totalBloqueosIndividuales).toLocaleString('es-CL')}</div>
+                        <div className="value">${(totalReservas + totalBloqueosIndividuales + totalPagosClubs).toLocaleString('es-CL')}</div>
                         <div className="sub">reservas + bloqueos pagados</div>
                       </div>
                     </div>
