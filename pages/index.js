@@ -92,6 +92,7 @@ export default function Home() {
   const [nombre, setNombre] = useState('')
   const [celular, setCelular] = useState('')
   const [email, setEmail] = useState('')
+  const [deporte, setDeporte] = useState('')
   const [comprobante, setComprobante] = useState(null)
   const [errores, setErrores] = useState({})
 
@@ -158,6 +159,7 @@ export default function Home() {
     setExito(false)
     setNombre('')
     setCelular('')
+    setDeporte('')
     setEmail('')
     setComprobante(null)
     setErrores({})
@@ -194,6 +196,7 @@ export default function Home() {
         nombre_reservante: nombre.trim(),
         celular: celular.trim(),
         email_reservante: email.trim(),
+        deporte: deporte.trim() || null,
         comprobante_url: comprobanteUrl,
         monto: 10000,
         estado: 'pendiente'
@@ -212,7 +215,7 @@ export default function Home() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           nombre, celular, email, fecha,
-          horas: horasSeleccionadas, comprobanteUrl,
+          horas: horasSeleccionadas, comprobanteUrl, deporte,
           monto: 10000 * horasSeleccionadas.length,
           reservaId
         })
@@ -583,6 +586,26 @@ export default function Home() {
                     type="email"
                   />
                   {errores.email && <p className="form-error">{errores.email}</p>}
+                </div>
+
+                <div className="form-grupo">
+                  <label className="form-label">¿Qué deporte practicarán? *</label>
+                  <select
+                    className="form-input"
+                    value={deporte}
+                    onChange={e => setDeporte(e.target.value)}
+                  >
+                    <option value="">Selecciona un deporte</option>
+                    <option value="Fútbol">Fútbol</option>
+                    <option value="Básquetbol">Básquetbol</option>
+                    <option value="Vóley">Vóley</option>
+                    <option value="Otro">Otro</option>
+                  </select>
+                  {deporte === "Vóley" && (
+                    <div style={{ marginTop: 8, padding: "10px 14px", borderRadius: 8, background: "#fef9c3", border: "1.5px solid #fde68a", color: "#92400e", fontSize: "0.82rem" }}>
+                      ⚠️ El gimnasio no cuenta con malla propia para vóley. Deberás traer la tuya.
+                    </div>
+                  )}
                 </div>
 
                 <div className="form-grupo">

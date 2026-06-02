@@ -13,7 +13,7 @@ export default async function handler(req, res) {
   if (req.method !== 'POST') return res.status(405).end()
   if (!limiter.permitir(req, res)) return
 
-  const { nombre, celular, email, fecha, horas, comprobanteUrl, monto, reservaId } = req.body
+  const { nombre, celular, email, fecha, horas, comprobanteUrl, monto, reservaId, deporte } = req.body
 
   // Validar todos los campos antes de usarlos
   const errores = validar({
@@ -39,6 +39,7 @@ export default async function handler(req, res) {
   const fechaFormateada = fecha.split('-').reverse().join('/')
   const horasFormateadas = horas.map(h => `${h.toString().padStart(2, '0')}:00`).join(' y ')
   const montoFormateado = Number(monto).toLocaleString('es-CL')
+  const deporteSeguro = deporte ? sanitizar(deporte.trim()) : 'No especificado'
 
   // Base URL solo desde variables de entorno — nunca hardcodeado
   const baseUrl = process.env.NEXT_PUBLIC_BASE_URL
@@ -76,6 +77,10 @@ export default async function handler(req, res) {
           <tr style="border-bottom:1px solid #f3f4f6">
             <td style="padding:10px 0;color:#6b7280;font-size:14px">Hora(s)</td>
             <td style="padding:10px 0;font-weight:600">${horasFormateadas}</td>
+          </tr>
+          <tr style="border-bottom:1px solid #f3f4f6">
+            <td style="padding:10px 0;color:#6b7280;font-size:14px">Deporte</td>
+            <td style="padding:10px 0;font-weight:600">${deporteSeguro}</td>
           </tr>
           <tr>
             <td style="padding:10px 0;color:#6b7280;font-size:14px">Monto</td>
