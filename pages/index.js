@@ -15,7 +15,7 @@ function formatHora(h) {
 function hoyChile() {
   const now = new Date()
   const chile = new Date(now.toLocaleString('en-US', { timeZone: 'America/Santiago' }))
-  return chile.toISOString().split('T')[0]
+  const y = chile.getFullYear(); const m = String(chile.getMonth()+1).padStart(2,'0'); const d = String(chile.getDate()).padStart(2,'0'); return `${y}-${m}-${d}`
 }
 
 function ahoraChileHour() {
@@ -28,7 +28,7 @@ function maxFechaChile() {
   const now = new Date()
   const chile = new Date(now.toLocaleString('en-US', { timeZone: 'America/Santiago' }))
   chile.setDate(chile.getDate() + 14)
-  return chile.toISOString().split('T')[0]
+  const y = chile.getFullYear(); const m = String(chile.getMonth()+1).padStart(2,'0'); const d = String(chile.getDate()).padStart(2,'0'); return `${y}-${m}-${d}`
 }
 
 function fechaLarga(yyyymmdd) {
