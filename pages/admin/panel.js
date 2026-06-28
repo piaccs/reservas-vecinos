@@ -58,6 +58,10 @@ export default function AdminPanel() {
   const [nuevaExcepcion, setNuevaExcepcion] = useState({ nombre_club: '', fecha: hoyChile(), hora: 9, tipo: 'sobrebloqueada', liberar_hora: false, notas: '' })
   const [guardandoExcepcion, setGuardandoExcepcion] = useState(false)
   const [mostrarFormExcepcion, setMostrarFormExcepcion] = useState(false)
+  // Aviso de ausencia inline por club
+  const [clubConAviso, setClubConAviso] = useState(null)
+  const [avisoForm, setAvisoForm] = useState({ fecha: hoyChile(), horas: [], liberar: true, notas: '' })
+  const [guardandoAviso, setGuardandoAviso] = useState(false)
 
   // Reporte
   const [mesReporte, setMesReporte] = useState(new Date().toISOString().slice(0, 7))
@@ -172,6 +176,28 @@ export default function AdminPanel() {
       alert('✓ Excepción registrada')
     }
     setGuardandoExcepcion(false)
+  }
+
+  async function guardarAviso(nombreClub, diasClub) {
+    if (avisoForm.horas.length === 0) return alert('Selecciona al menos una hora')
+    setGuardandoAviso(true)
+    const registros = avisoForm.horas.map(hora => ({
+      nombre_club: nombreClub,
+      fecha: avisoForm.fecha,
+      hora,
+      tipo: 'aviso_anticipado',
+      liberar_hora: avisoForm.liberar,
+      notas: avisoForm.notas || null,
+      registrado_por: admin.email
+    }))
+    const { error } = await supabase.from('excepciones_clubes').insert(registros)
+    if (error) alert('Error: ' + error.message)
+    else {
+      setClubConAviso(null)
+      setAvisoForm({ fecha: hoyChile(), horas: [], liberar: true, notas: '' })
+      alert('✓ Aviso registrado. Las horas quedan libres para vecinos y no se cobrarán al club.')
+    }
+    setGuardandoAviso(false)
   }
 
   async function eliminarExcepcion(id) {
@@ -957,6 +983,113 @@ export default function AdminPanel() {
                                       ))}
                                     </tbody>
                                   </table>
+                                  {/* Botón aviso ausencia */}
+                                  <div style={{ marginTop: 12 }}>
+                                    {clubConAviso === nombre ? (
+                                      <div style={{ background: 'var(--bg)', border: '1px solid var(--border-soft)', borderRadius: 10, padding: 14, marginTop: 4 }}>
+                                        <div style={{ fontSize: '0.84rem', fontWeight: 600, color: 'var(--ink)', marginBottom: 10 }}>
+                                          Registrar aviso de ausencia — {nombre}
+                                        </div>
+                                        <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap', marginBottom: 10 }}>
+                                          <div style={{ flex: 1, minWidth: 140 }}>
+                                            <label className="form-label">Fecha</label>
+                                            <input
+                                              className="form-input"
+                                              type="date"
+                                              value={avisoForm.fecha}
+                                              onChange={e => setAvisoForm(p => ({ ...p, fecha: e.target.value, horas: [] }))}
+                                            />
+                                          </div>
+                                        </div>
+                                        <div style={{ marginBottom: 10 }}>
+                                          <label className="form-label">Horas a liberar</label>
+                                          <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+                                            {dias.filter(d => {
+                                              const fechaObj = new Date(avisoForm.fecha + 'T12:00:00')
+                                              return d.dia_semana === fechaObj.getDay()
+                                            }).map(d => (
+                                              <button
+                                                key={d.hora_inicio}
+                                                type="button"
+                                                onClick={() => setAvisoForm(p => ({
+                                                  ...p,
+                                                  horas: p.horas.includes(d.hora_inicio)
+                                                    ? p.horas.filter(h => h !== d.hora_inicio)
+                                                    : [...p.horas, d.hora_inicio]
+                                                }))}
+                                                style={{
+                                                  padding: '5px 12px', borderRadius: 7, fontSize: '0.8rem', fontWeight: 600, cursor: 'pointer',
+                                                  border: '1.5px solid',
+                                                  borderColor: avisoForm.horas.includes(d.hora_inicio) ? 'var(--verde)' : 'var(--border)',
+                                                  background: avisoForm.horas.includes(d.hora_inicio) ? 'var(--verde-pale)' : 'var(--bg)',
+                                                  color: avisoForm.horas.includes(d.hora_inicio) ? 'var(--verde)' : 'var(--ink-dim)',
+                                                }}
+                                              >
+                                                {formatHora(d.hora_inicio)}
+                                              </button>
+                                            ))}
+                                            {dias.filter(d => {
+                                              const fechaObj = new Date(avisoForm.fecha + 'T12:00:00')
+                                              return d.dia_semana === fechaObj.getDay()
+                                            }).length === 0 && (
+                                              <span style={{ fontSize: '0.78rem', color: 'var(--ink-dim)' }}>
+                                                Este club no tiene horas ese día.
+                                              </span>
+                                            )}
+                                          </div>
+                                        </div>
+                                        <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 10 }}>
+                                          <input
+                                            type="checkbox"
+                                            id={`liberar-${nombre}`}
+                                            checked={avisoForm.liberar}
+                                            onChange={e => setAvisoForm(p => ({ ...p, liberar: e.target.checked }))}
+                                            style={{ width: 15, height: 15, cursor: 'pointer' }}
+                                          />
+                                          <label htmlFor={`liberar-${nombre}`} style={{ fontSize: '0.82rem', color: 'var(--ink)', cursor: 'pointer' }}>
+                                            Liberar horas para que vecinos puedan reservar
+                                          </label>
+                                        </div>
+                                        <input
+                                          className="form-input"
+                                          placeholder="Notas (opcional, ej: Feriado 18 de septiembre)"
+                                          value={avisoForm.notas}
+                                          onChange={e => setAvisoForm(p => ({ ...p, notas: e.target.value }))}
+                                          style={{ marginBottom: 10 }}
+                                        />
+                                        <div style={{ display: 'flex', gap: 8 }}>
+                                          <button
+                                            className="btn-verde"
+                                            onClick={() => guardarAviso(nombre, dias)}
+                                            disabled={guardandoAviso || avisoForm.horas.length === 0}
+                                            style={{ flex: 1 }}
+                                          >
+                                            {guardandoAviso ? 'Guardando…' : 'Registrar aviso'}
+                                          </button>
+                                          <button
+                                            type="button"
+                                            onClick={() => setClubConAviso(null)}
+                                            style={{ padding: '8px 14px', borderRadius: 8, border: '1px solid var(--border)', background: 'none', cursor: 'pointer', fontSize: '0.82rem', color: 'var(--ink-dim)' }}
+                                          >
+                                            Cancelar
+                                          </button>
+                                        </div>
+                                      </div>
+                                    ) : (
+                                      <button
+                                        type="button"
+                                        onClick={(e) => { e.stopPropagation(); setClubConAviso(nombre); setAvisoForm({ fecha: hoyChile(), horas: [], liberar: true, notas: '' }) }}
+                                        style={{
+                                          background: 'none', border: '1.5px dashed var(--border)', borderRadius: 9,
+                                          padding: '7px 14px', color: 'var(--ink-dim)', cursor: 'pointer',
+                                          fontFamily: 'inherit', fontSize: '0.8rem', fontWeight: 600,
+                                          display: 'inline-flex', alignItems: 'center', gap: 6,
+                                        }}
+                                      >
+                                        + Registrar aviso de ausencia
+                                      </button>
+                                    )}
+                                  </div>
                                 </div>
                               )}
                             </div>
