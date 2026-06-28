@@ -1265,7 +1265,7 @@ export default function AdminPanel() {
                               <Icon name="wallet" size={15} />
                               Registrar pago de club
                             </div>
-                            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(160px, 1fr))', gap: 10, alignItems: 'flex-end' }}>
+                            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
                               <div>
                                 <label className="form-label">Club</label>
                                 <select className="form-input" value={nuevoPago.nombre_club} onChange={e => setNuevoPago(p => ({ ...p, nombre_club: e.target.value }))}>
@@ -1294,29 +1294,38 @@ export default function AdminPanel() {
                                 <input className="form-input" placeholder="Ej: Pagó con descuento" value={nuevoPago.notas} onChange={e => setNuevoPago(p => ({ ...p, notas: e.target.value }))} />
                               </div>
                             </div>
-                            <button className="btn-verde" style={{ marginTop: 12, width: 'auto', padding: '11px 20px' }} onClick={registrarPago} disabled={guardandoPago}>
+                            <button className="btn-verde" style={{ marginTop: 14, width: 'auto', padding: '11px 20px' }} onClick={registrarPago} disabled={guardandoPago}>
                               {guardandoPago ? 'Guardando…' : 'Registrar pago'}
                             </button>
 
                             {pagosClubs.length > 0 && (
-                              <div style={{ marginTop: '1rem' }}>
-                                <div style={{ fontSize: '0.78rem', fontWeight: 600, color: 'var(--verde)', marginBottom: 6 }}>
+                              <div style={{ marginTop: '1.2rem' }}>
+                                <div style={{ fontSize: '0.78rem', fontWeight: 600, color: 'var(--verde)', marginBottom: 8 }}>
                                   Pagos correspondientes a {mesReporte}:
                                 </div>
+                                <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
                                 {pagosClubs.map(p => (
                                   <div key={p.id} style={{
-                                    display: 'flex', justifyContent: 'space-between', alignItems: 'center',
-                                    padding: '6px 0', borderBottom: '1px solid #dcfce7', fontSize: '0.82rem'
+                                    display: 'grid', gridTemplateColumns: '1fr auto',
+                                    alignItems: 'center', gap: 12,
+                                    padding: '10px 14px', borderRadius: 9,
+                                    background: 'white', border: '1px solid #dcfce7', fontSize: '0.82rem'
                                   }}>
-                                    <span>
-                                      <strong>{p.nombre_club}</strong> — ${p.monto_pagado.toLocaleString('es-CL')} —{' '}
-                                      pagado el {p.fecha_pago.split('-').reverse().join('/')}
-                                      {p.numero_operacion ? <span style={{ fontFamily: 'monospace', marginLeft: 6, color: 'var(--ink-dim)', fontSize: '0.78rem' }}>op. {p.numero_operacion}</span> : ''}
-                                      {p.notas ? ` — ${p.notas}` : ''}
-                                    </span>
+                                    <div>
+                                      <div style={{ fontWeight: 600, color: 'var(--ink)', marginBottom: 2 }}>
+                                        {p.nombre_club}
+                                        <span style={{ fontWeight: 400, color: 'var(--verde)', marginLeft: 8 }}>${p.monto_pagado.toLocaleString('es-CL')}</span>
+                                      </div>
+                                      <div style={{ color: 'var(--ink-dim)', fontSize: '0.78rem', display: 'flex', gap: 10, flexWrap: 'wrap' }}>
+                                        <span>Pagado el {p.fecha_pago.split('-').reverse().join('/')}</span>
+                                        {p.numero_operacion && <span style={{ fontFamily: 'monospace' }}>Op. {p.numero_operacion}</span>}
+                                        {p.notas && <span>— {p.notas}</span>}
+                                      </div>
+                                    </div>
                                     <button className="link-action danger" onClick={() => eliminarPago(p.id)}>Eliminar</button>
                                   </div>
                                 ))}
+                                </div>
                               </div>
                             )}
                           </div>
