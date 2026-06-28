@@ -71,7 +71,7 @@ export default function AdminPanel() {
   const [pagosClubs, setPagosClubs] = useState([])
   const [clubesSemanales, setClubesSemanales] = useState([])
   const [excepcionesReporte, setExcepcionesReporte] = useState([])
-  const [nuevoPago, setNuevoPago] = useState({ nombre_club: '', monto_pagado: '', fecha_pago: hoyChile(), notas: '' })
+  const [nuevoPago, setNuevoPago] = useState({ nombre_club: '', monto_pagado: '', fecha_pago: hoyChile(), mes_uso: new Date().toISOString().slice(0,7).split('-').map((v,i) => i===1 ? String(parseInt(v)-1).padStart(2,'0') : v).join('-'), numero_operacion: '', notas: '' })
   const [guardandoPago, setGuardandoPago] = useState(false)
 
   // Reservas
@@ -207,7 +207,7 @@ export default function AdminPanel() {
   }
 
   async function cargarPagosClubs(mes) {
-    const { data } = await supabase.from('pagos_clubes').select('*').eq('mes', mes).order('fecha_pago')
+    const { data } = await supabase.from('pagos_clubes').select('*').eq('mes_uso', mes).order('fecha_pago')
     setPagosClubs(data || [])
   }
 
@@ -223,15 +223,17 @@ export default function AdminPanel() {
     setGuardandoPago(true)
     const { error } = await supabase.from('pagos_clubes').insert({
       nombre_club: nuevoPago.nombre_club,
-      mes: mesReporte,
+      mes: nuevoPago.mes_uso,
+      mes_uso: nuevoPago.mes_uso,
       monto_pagado: parseInt(nuevoPago.monto_pagado),
       fecha_pago: nuevoPago.fecha_pago,
+      numero_operacion: nuevoPago.numero_operacion || null,
       notas: nuevoPago.notas || null,
       registrado_por: admin.email
     })
     if (error) alert('Error: ' + error.message)
     else {
-      setNuevoPago({ nombre_club: '', monto_pagado: '', fecha_pago: hoyChile(), notas: '' })
+      setNuevoPago({ nombre_club: '', monto_pagado: '', fecha_pago: hoyChile(), mes_uso: new Date().toISOString().slice(0,7).split('-').map((v,i) => i===1 ? String(parseInt(v)-1).padStart(2,'0') : v).join('-'), numero_operacion: '', notas: '' })
       await cargarPagosClubs(mesReporte)
       alert('✓ Pago registrado')
     }
@@ -1263,35 +1265,43 @@ export default function AdminPanel() {
                               <Icon name="wallet" size={15} />
                               Registrar pago de club
                             </div>
-                            <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap', alignItems: 'flex-end' }}>
-                              <div style={{ minWidth: 180 }}>
+                            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(160px, 1fr))', gap: 10, alignItems: 'flex-end' }}>
+                              <div>
                                 <label className="form-label">Club</label>
                                 <select className="form-input" value={nuevoPago.nombre_club} onChange={e => setNuevoPago(p => ({ ...p, nombre_club: e.target.value }))}>
                                   <option value="">Seleccionar…</option>
                                   {Object.keys(clubesSemanales.reduce((acc, b) => { acc[b.motivo] = true; return acc }, {})).map(n => <option key={n} value={n}>{n}</option>)}
                                 </select>
                               </div>
-                              <div style={{ width: 140 }}>
+                              <div>
+                                <label className="form-label">Corresponde al mes de uso</label>
+                                <input className="form-input" type="month" value={nuevoPago.mes_uso} onChange={e => setNuevoPago(p => ({ ...p, mes_uso: e.target.value }))} />
+                              </div>
+                              <div>
+                                <label className="form-label">Fecha de pago</label>
+                                <input className="form-input" type="date" value={nuevoPago.fecha_pago} onChange={e => setNuevoPago(p => ({ ...p, fecha_pago: e.target.value }))} />
+                              </div>
+                              <div>
                                 <label className="form-label">Monto ($)</label>
                                 <input className="form-input" type="number" placeholder="Ej: 80000" value={nuevoPago.monto_pagado} onChange={e => setNuevoPago(p => ({ ...p, monto_pagado: e.target.value }))} />
                               </div>
-                              <div style={{ width: 150 }}>
-                                <label className="form-label">Fecha</label>
-                                <input className="form-input" type="date" value={nuevoPago.fecha_pago} onChange={e => setNuevoPago(p => ({ ...p, fecha_pago: e.target.value }))} />
+                              <div>
+                                <label className="form-label">N° operación</label>
+                                <input className="form-input" placeholder="Ej: 48291037" value={nuevoPago.numero_operacion} onChange={e => setNuevoPago(p => ({ ...p, numero_operacion: e.target.value }))} />
                               </div>
-                              <div style={{ flex: 1, minWidth: 180 }}>
+                              <div>
                                 <label className="form-label">Notas (opcional)</label>
-                                <input className="form-input" placeholder="Ej: Pagó por transferencia" value={nuevoPago.notas} onChange={e => setNuevoPago(p => ({ ...p, notas: e.target.value }))} />
+                                <input className="form-input" placeholder="Ej: Pagó con descuento" value={nuevoPago.notas} onChange={e => setNuevoPago(p => ({ ...p, notas: e.target.value }))} />
                               </div>
-                              <button className="btn-verde" style={{ width: 'auto', padding: '11px 20px' }} onClick={registrarPago} disabled={guardandoPago}>
-                                {guardandoPago ? 'Guardando…' : 'Registrar pago'}
-                              </button>
                             </div>
+                            <button className="btn-verde" style={{ marginTop: 12, width: 'auto', padding: '11px 20px' }} onClick={registrarPago} disabled={guardandoPago}>
+                              {guardandoPago ? 'Guardando…' : 'Registrar pago'}
+                            </button>
 
                             {pagosClubs.length > 0 && (
                               <div style={{ marginTop: '1rem' }}>
                                 <div style={{ fontSize: '0.78rem', fontWeight: 600, color: 'var(--verde)', marginBottom: 6 }}>
-                                  Pagos registrados este mes:
+                                  Pagos correspondientes a {mesReporte}:
                                 </div>
                                 {pagosClubs.map(p => (
                                   <div key={p.id} style={{
@@ -1300,7 +1310,9 @@ export default function AdminPanel() {
                                   }}>
                                     <span>
                                       <strong>{p.nombre_club}</strong> — ${p.monto_pagado.toLocaleString('es-CL')} —{' '}
-                                      {p.fecha_pago.split('-').reverse().join('/')}{p.notas ? ` — ${p.notas}` : ''}
+                                      pagado el {p.fecha_pago.split('-').reverse().join('/')}
+                                      {p.numero_operacion ? <span style={{ fontFamily: 'monospace', marginLeft: 6, color: 'var(--ink-dim)', fontSize: '0.78rem' }}>op. {p.numero_operacion}</span> : ''}
+                                      {p.notas ? ` — ${p.notas}` : ''}
                                     </span>
                                     <button className="link-action danger" onClick={() => eliminarPago(p.id)}>Eliminar</button>
                                   </div>
