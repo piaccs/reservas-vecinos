@@ -121,7 +121,17 @@ export default function Home() {
       .eq('dia_semana', diaSemana)
       .eq('activo', true)
 
-    const horasBloqSemanales = semanales ? semanales.map(s => s.hora_inicio) : []
+    // Horas de clubes liberadas por aviso anticipado (feriado u otro motivo)
+    const { data: excepcionesLiberadas } = await supabase
+      .from('excepciones_clubes')
+      .select('hora')
+      .eq('fecha', fecha)
+      .eq('liberar_hora', true)
+
+    const horasLiberadas = excepcionesLiberadas ? excepcionesLiberadas.map(e => e.hora) : []
+    const horasBloqSemanales = semanales
+      ? semanales.map(s => s.hora_inicio).filter(h => !horasLiberadas.includes(h))
+      : []
     const horasBloqFecha = bloqueos ? bloqueos.map(b => b.hora) : []
 
     setHorasOcupadas(reservas ? reservas.map(r => r.hora) : [])
