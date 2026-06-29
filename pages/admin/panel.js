@@ -195,6 +195,7 @@ export default function AdminPanel() {
     else {
       setClubConAviso(null)
       setAvisoForm({ fecha: hoyChile(), horas: [], liberar: true, notas: '' })
+      await cargarExcepciones()
       alert('✓ Aviso registrado. Las horas quedan libres para vecinos y no se cobrarán al club.')
     }
     setGuardandoAviso(false)
@@ -985,6 +986,32 @@ export default function AdminPanel() {
                                       ))}
                                     </tbody>
                                   </table>
+                                  {/* Avisos de ausencia registrados */}
+                                  {excepcionesGuardadas.filter(e => e.nombre_club === nombre && e.tipo === 'aviso_anticipado').length > 0 && (
+                                    <div style={{ marginTop: 14, display: 'flex', flexDirection: 'column', gap: 6 }}>
+                                      <div style={{ fontSize: '0.8rem', fontWeight: 600, color: 'var(--ink)' }}>
+                                        Avisos de ausencia registrados:
+                                      </div>
+                                      {excepcionesGuardadas
+                                        .filter(e => e.nombre_club === nombre && e.tipo === 'aviso_anticipado')
+                                        .map(e => (
+                                          <div key={e.id} style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10, fontSize: '0.82rem', background: 'var(--bg)', border: '1px solid var(--border-soft)', borderRadius: 8, padding: '6px 10px' }}>
+                                            <span>
+                                              {formatFechaCorta(e.fecha)} {formatHora(e.hora)}
+                                              {e.notas && <span className="text-dim"> — {e.notas}</span>}
+                                              {e.liberar_hora && <span style={{ color: 'var(--verde)', fontSize: '0.72rem' }}> · hora liberada</span>}
+                                            </span>
+                                            <button
+                                              type="button"
+                                              className="link-action danger"
+                                              onClick={(ev) => { ev.stopPropagation(); eliminarExcepcion(e.id) }}
+                                            >
+                                              Eliminar
+                                            </button>
+                                          </div>
+                                        ))}
+                                    </div>
+                                  )}
                                   {/* Botón aviso ausencia */}
                                   <div style={{ marginTop: 12 }}>
                                     {clubConAviso === nombre ? (
@@ -1253,6 +1280,14 @@ export default function AdminPanel() {
                                     <span className="text-dim">{formatFechaCorta(e.fecha)} {formatHora(e.hora)}</span>
                                     {e.notas && <span className="text-dim">— {e.notas}</span>}
                                     {e.liberar_hora && <span style={{ color: 'var(--verde)', fontSize: '0.72rem' }}>· hora liberada</span>}
+                                    <button
+                                      type="button"
+                                      className="link-action danger"
+                                      style={{ marginLeft: 'auto' }}
+                                      onClick={() => { eliminarExcepcion(e.id); setExcepcionesReporte(prev => prev.filter(x => x.id !== e.id)) }}
+                                    >
+                                      Eliminar
+                                    </button>
                                   </div>
                                 ))}
                               </div>
