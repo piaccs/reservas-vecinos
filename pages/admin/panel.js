@@ -76,6 +76,16 @@ export default function AdminPanel() {
 
   // Reservas
   const [todasReservas, setTodasReservas] = useState([])
+  const [devolucionesManuales, setDevolucionesManuales] = useState([])
+  const [formDevolucionAbierto, setFormDevolucionAbierto] = useState(false)
+  const [modoDevolucion, setModoDevolucion] = useState('reserva') // 'reserva' o 'libre'
+  const [busquedaReservaDevolucion, setBusquedaReservaDevolucion] = useState('')
+  const [reservaSeleccionadaDevolucion, setReservaSeleccionadaDevolucion] = useState(null)
+  const [nombreLibreDevolucion, setNombreLibreDevolucion] = useState('')
+  const [celularLibreDevolucion, setCelularLibreDevolucion] = useState('')
+  const [montoDevolucion, setMontoDevolucion] = useState('')
+  const [porcentajeDevolucion, setPorcentajeDevolucion] = useState('100')
+  const [motivoDevolucion, setMotivoDevolucion] = useState('')
   const [cargandoReservas, setCargandoReservas] = useState(false)
   const [filtroReservas, setFiltroReservas] = useState('todas')
   const [busquedaReservas, setBusquedaReservas] = useState('')
@@ -96,7 +106,7 @@ export default function AdminPanel() {
     if (tab === 'bloqueos') { cargarHorasBloqueo(); cargarClubes() }
     if (tab === 'clubes') { cargarClubes(); cargarExcepciones() }
     if (tab === 'reservas') cargarTodasReservas()
-    if (tab === 'devoluciones') cargarTodasReservas()
+    if (tab === 'devoluciones') { cargarTodasReservas(); cargarDevoluciones() }
   }, [tab, fechaBloqueo])
 
   async function cargarHorasBloqueo() {
@@ -365,6 +375,37 @@ export default function AdminPanel() {
     await cargarHorasBloqueo()
   }
 
+  async function cargarDevoluciones() {
+    const { data } = await supabase.from('devoluciones').select('*').order('creada_en', { ascending: false })
+    setDevolucionesManuales(data || [])
+  }
+
+  async function registrarDevolucion({ reserva, nombre, celular, monto, porcentaje, motivo }) {
+    const registro = {
+      reserva_id: reserva ? reserva.id : null,
+      nombre: reserva ? reserva.nombre_reservante : nombre.trim(),
+      celular: reserva ? reserva.celular : (celular || null),
+      monto: parseInt(monto),
+      porcentaje: porcentaje ? parseInt(porcentaje) : null,
+      motivo: motivo?.trim() || (reserva ? 'Cancelación registrada manualmente' : 'Depósito sin reserva asociada'),
+      estado: 'pendiente'
+    }
+    if (!registro.nombre || !registro.monto || isNaN(registro.monto)) return alert('Falta nombre o monto válido')
+    const { error } = await supabase.from('devoluciones').insert(registro)
+    if (error) return alert('Error al registrar: ' + error.message)
+    await cargarDevoluciones()
+    setFormDevolucionAbierto(false)
+    setBusquedaReservaDevolucion('')
+    setReservaSeleccionadaDevolucion(null)
+  }
+
+  async function marcarManualDevuelta(id) {
+    if (!confirm('¿Confirmas que ya se realizó esta devolución?')) return
+    const { error } = await supabase.from('devoluciones').update({ estado: 'procesada', devuelta_en: new Date().toISOString() }).eq('id', id)
+    if (error) alert('Error al actualizar: ' + error.message)
+    else await cargarDevoluciones()
+  }
+
   async function marcarDevuelta(id) {
     if (!confirm('¿Confirmas que ya se realizó esta devolución?')) return
     const { error } = await supabase.from('reservas').update({
@@ -442,12 +483,31 @@ export default function AdminPanel() {
   const totalBloqueosIndividuales = bloqueosReporte.filter(b => b.tipo === 'pagado' && !b.motivo?.startsWith('Hora extra —') && !b.motivo?.startsWith('Recuperación —')).reduce((s, b) => s + (b.monto || 0), 0)
   const totalPagosClubs = pagosClubs.reduce((s, p) => s + (p.monto_pagado || 0), 0)
 
-  const devolucionesFiltradas = todasReservas
+  const devolucionesAuto = todasReservas
     .filter(r => r.estado_devolucion === 'pendiente' || r.estado_devolucion === 'procesada')
-    .sort((a, b) => (a.estado_devolucion === b.estado_devolucion ? 0 : a.estado_devolucion === 'pendiente' ? -1 : 1))
+    .map(r => ({
+      id: r.id, origen: 'auto', nombre: r.nombre_reservante, celular: r.celular,
+      fecha: r.fecha, hora: r.hora,
+      motivo: r.estado === 'rechazada' ? 'Rechazada por directiva' : 'Cancelada por vecino (aviso web)',
+      porcentaje: r.porcentaje_devolucion, monto: r.monto_devolucion, estado: r.estado_devolucion
+    }))
+  const devolucionesLibres = devolucionesManuales.map(d => ({
+    id: d.id, origen: 'manual', nombre: d.nombre, celular: d.celular,
+    fecha: null, hora: null,
+    motivo: d.motivo, porcentaje: d.porcentaje, monto: d.monto, estado: d.estado
+  }))
+  const devolucionesFiltradas = [...devolucionesAuto, ...devolucionesLibres]
+    .sort((a, b) => (a.estado === b.estado ? 0 : a.estado === 'pendiente' ? -1 : 1))
   const totalDevolucionesPendientes = devolucionesFiltradas
-    .filter(r => r.estado_devolucion === 'pendiente')
-    .reduce((s, r) => s + (r.monto_devolucion || 0), 0)
+    .filter(r => r.estado === 'pendiente')
+    .reduce((s, r) => s + (r.monto || 0), 0)
+
+  const reservasParaBusqueda = busquedaReservaDevolucion.length >= 2
+    ? todasReservas.filter(r =>
+        r.estado === 'confirmada' &&
+        (r.nombre_reservante?.toLowerCase().includes(busquedaReservaDevolucion.toLowerCase()) || r.celular?.includes(busquedaReservaDevolucion))
+      ).slice(0, 6)
+    : []
 
   const reservasFiltradas = todasReservas.filter(r => {
     const hoy = hoyChile()
@@ -1589,8 +1649,11 @@ export default function AdminPanel() {
                   <div>
                     <div className="kicker">Cancelaciones y rechazos</div>
                     <h1>Devoluciones</h1>
-                    <p className="subtitle">Reservas canceladas por el vecino o rechazadas por la directiva que requieren devolución de dinero.</p>
+                    <p className="subtitle">Dinero pendiente de devolver — automático (cancelaciones web, rechazos) o registrado manualmente.</p>
                   </div>
+                  <button className="btn-verde" onClick={() => setFormDevolucionAbierto(v => !v)}>
+                    {formDevolucionAbierto ? 'Cerrar' : '+ Registrar devolución'}
+                  </button>
                 </div>
 
                 <div style={{
@@ -1605,6 +1668,95 @@ export default function AdminPanel() {
                   </div>
                 </div>
 
+                {formDevolucionAbierto && (
+                  <div className="tabla-wrap" style={{ padding: 20, marginBottom: 20 }}>
+                    <div style={{ display: 'flex', gap: 8, marginBottom: 16 }}>
+                      <button
+                        className={`btn-pill ${modoDevolucion === 'reserva' ? 'active' : ''}`}
+                        onClick={() => { setModoDevolucion('reserva'); setReservaSeleccionadaDevolucion(null) }}
+                      >Buscar reserva existente</button>
+                      <button
+                        className={`btn-pill ${modoDevolucion === 'libre' ? 'active' : ''}`}
+                        onClick={() => { setModoDevolucion('libre'); setReservaSeleccionadaDevolucion(null) }}
+                      >Sin reserva (depósito sin reservar)</button>
+                    </div>
+
+                    {modoDevolucion === 'reserva' ? (
+                      <>
+                        {!reservaSeleccionadaDevolucion ? (
+                          <div className="form-grupo">
+                            <label className="form-label">Buscar por nombre o celular</label>
+                            <input
+                              className="form-input"
+                              placeholder="Ej: Juan Pérez"
+                              value={busquedaReservaDevolucion}
+                              onChange={e => setBusquedaReservaDevolucion(e.target.value)}
+                            />
+                            {reservasParaBusqueda.length > 0 && (
+                              <div style={{ marginTop: 8, border: '1px solid var(--border)', borderRadius: 8, overflow: 'hidden' }}>
+                                {reservasParaBusqueda.map(r => (
+                                  <div
+                                    key={r.id}
+                                    onClick={() => { setReservaSeleccionadaDevolucion(r); setMontoDevolucion(String(r.monto || 10000)) }}
+                                    style={{ padding: '10px 14px', borderBottom: '1px solid var(--border-soft)', cursor: 'pointer', fontSize: '0.86rem' }}
+                                  >
+                                    <strong>{r.nombre_reservante}</strong> — {r.celular} — {formatFechaCorta(r.fecha)} {formatHora(r.hora)} — ${(r.monto || 10000).toLocaleString('es-CL')}
+                                  </div>
+                                ))}
+                              </div>
+                            )}
+                          </div>
+                        ) : (
+                          <div style={{ marginBottom: 14, fontSize: '0.86rem' }}>
+                            Reserva seleccionada: <strong>{reservaSeleccionadaDevolucion.nombre_reservante}</strong> — {formatFechaCorta(reservaSeleccionadaDevolucion.fecha)} {formatHora(reservaSeleccionadaDevolucion.hora)}{' '}
+                            <button className="link-action" onClick={() => { setReservaSeleccionadaDevolucion(null); setBusquedaReservaDevolucion('') }}>Cambiar</button>
+                          </div>
+                        )}
+                      </>
+                    ) : (
+                      <>
+                        <div className="form-grupo">
+                          <label className="form-label">Nombre *</label>
+                          <input className="form-input" value={nombreLibreDevolucion} onChange={e => setNombreLibreDevolucion(e.target.value)} />
+                        </div>
+                        <div className="form-grupo">
+                          <label className="form-label">Celular</label>
+                          <input className="form-input" value={celularLibreDevolucion} onChange={e => setCelularLibreDevolucion(e.target.value)} />
+                        </div>
+                      </>
+                    )}
+
+                    <div style={{ display: 'flex', gap: 12 }}>
+                      <div className="form-grupo" style={{ flex: 1 }}>
+                        <label className="form-label">Monto a devolver *</label>
+                        <input className="form-input" type="number" value={montoDevolucion} onChange={e => setMontoDevolucion(e.target.value)} />
+                      </div>
+                      <div className="form-grupo" style={{ width: 120 }}>
+                        <label className="form-label">%</label>
+                        <input className="form-input" type="number" value={porcentajeDevolucion} onChange={e => setPorcentajeDevolucion(e.target.value)} />
+                      </div>
+                    </div>
+                    <div className="form-grupo">
+                      <label className="form-label">Motivo (opcional)</label>
+                      <input className="form-input" placeholder="Ej: avisó por teléfono, depositó sin reservar…" value={motivoDevolucion} onChange={e => setMotivoDevolucion(e.target.value)} />
+                    </div>
+
+                    <button
+                      className="btn-verde"
+                      onClick={() => registrarDevolucion({
+                        reserva: modoDevolucion === 'reserva' ? reservaSeleccionadaDevolucion : null,
+                        nombre: nombreLibreDevolucion,
+                        celular: celularLibreDevolucion,
+                        monto: montoDevolucion,
+                        porcentaje: porcentajeDevolucion,
+                        motivo: motivoDevolucion
+                      })}
+                    >
+                      Registrar devolución
+                    </button>
+                  </div>
+                )}
+
                 {cargandoReservas ? (
                   <div className="loading"><div className="spinner"></div>Cargando…</div>
                 ) : (
@@ -1615,7 +1767,6 @@ export default function AdminPanel() {
                           <tr>
                             <th>Estado</th>
                             <th>Fecha</th>
-                            <th>Hora</th>
                             <th>Vecino</th>
                             <th>Celular</th>
                             <th>Motivo</th>
@@ -1626,31 +1777,33 @@ export default function AdminPanel() {
                         </thead>
                         <tbody>
                           {devolucionesFiltradas.map(r => (
-                            <tr key={r.id}>
+                            <tr key={`${r.origen}-${r.id}`}>
                               <td>
-                                <span className={`badge ${r.estado_devolucion === 'procesada' ? 'badge-verde' : 'badge-amarillo'}`}>
+                                <span className={`badge ${r.estado === 'procesada' ? 'badge-verde' : 'badge-amarillo'}`}>
                                   <span className="dot"></span>
-                                  {r.estado_devolucion === 'procesada' ? 'Procesada' : 'Pendiente'}
+                                  {r.estado === 'procesada' ? 'Procesada' : 'Pendiente'}
                                 </span>
                               </td>
-                              <td className="num-strong">{formatFechaCorta(r.fecha)}</td>
-                              <td className="num-strong">{formatHora(r.hora)}</td>
-                              <td>{r.nombre_reservante}</td>
-                              <td className="text-dim">{r.celular}</td>
-                              <td className="text-dim">{r.estado === 'rechazada' ? 'Rechazada por directiva' : 'Cancelada por vecino'}</td>
-                              <td>{r.porcentaje_devolucion != null ? `${r.porcentaje_devolucion}%` : '—'}</td>
+                              <td className="num-strong">{r.fecha ? `${formatFechaCorta(r.fecha)} ${formatHora(r.hora)}` : '—'}</td>
+                              <td>{r.nombre}</td>
+                              <td className="text-dim">{r.celular || '—'}</td>
+                              <td className="text-dim">{r.motivo}</td>
+                              <td>{r.porcentaje != null ? `${r.porcentaje}%` : '—'}</td>
                               <td style={{ textAlign: 'right', color: '#dc2626', fontWeight: 600 }}>
-                                ${(r.monto_devolucion || 0).toLocaleString('es-CL')}
+                                ${(r.monto || 0).toLocaleString('es-CL')}
                               </td>
                               <td style={{ textAlign: 'right' }}>
-                                {r.estado_devolucion === 'pendiente' && (
-                                  <button className="link-action" onClick={() => marcarDevuelta(r.id)}>Marcar como devuelta</button>
+                                {r.estado === 'pendiente' && (
+                                  <button
+                                    className="link-action"
+                                    onClick={() => r.origen === 'auto' ? marcarDevuelta(r.id) : marcarManualDevuelta(r.id)}
+                                  >Marcar como devuelta</button>
                                 )}
                               </td>
                             </tr>
                           ))}
                           {devolucionesFiltradas.length === 0 && (
-                            <tr><td colSpan={9} style={{ textAlign: 'center', color: 'var(--ink-dim)', padding: '2rem' }}>
+                            <tr><td colSpan={8} style={{ textAlign: 'center', color: 'var(--ink-dim)', padding: '2rem' }}>
                               No hay devoluciones pendientes ni procesadas.
                             </td></tr>
                           )}
