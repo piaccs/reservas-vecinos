@@ -94,6 +94,7 @@ export default function Home() {
   const [email, setEmail] = useState('')
   const [deporte, setDeporte] = useState('')
   const [comprobante, setComprobante] = useState(null)
+  const [aceptaPolitica, setAceptaPolitica] = useState(false)
   const [errores, setErrores] = useState({})
 
   useEffect(() => { cargarHoras() }, [fecha])
@@ -106,7 +107,7 @@ export default function Home() {
       .from('reservas')
       .select('hora')
       .eq('fecha', fecha)
-      .eq('estado', 'confirmada')
+      .in('estado', ['confirmada', 'pendiente'])
 
     const { data: bloqueos } = await supabase
       .from('bloqueos')
@@ -172,6 +173,7 @@ export default function Home() {
     setDeporte('')
     setEmail('')
     setComprobante(null)
+    setAceptaPolitica(false)
     setErrores({})
   }
 
@@ -181,6 +183,7 @@ export default function Home() {
     if (!celular.trim() || celular.replace(/\D/g, '').length < 9) e.celular = 'Ingresa un celular válido'
     if (!email.trim() || !email.includes('@')) e.email = 'Ingresa un correo válido'
     if (!comprobante) e.comprobante = 'Debes subir el comprobante de transferencia'
+    if (!aceptaPolitica) e.politica = 'Debes aceptar la política de cancelación y devolución'
     setErrores(e)
     return Object.keys(e).length === 0
   }
@@ -235,7 +238,7 @@ export default function Home() {
       await cargarHoras()
     } catch (err) {
       console.error(err)
-      alert('Hubo un error al procesar la reserva. Por favor intenta nuevamente.')
+      alert('Hubo un error al procesar la reserva. Por favor intenta nuevamente o comunícate al +56 9 4170 7439.')
     } finally {
       setEnviando(false)
     }
@@ -647,6 +650,22 @@ export default function Home() {
                     )}
                   </div>
                   {errores.comprobante && <p className="form-error">{errores.comprobante}</p>}
+                </div>
+
+                <div className="form-grupo" style={{ background: '#f4f6f0', borderRadius: 10, padding: '14px 16px' }}>
+                  <div style={{ fontSize: '0.82rem', color: '#374151', marginBottom: 10 }}>
+                    <strong>Política de cancelación y devolución:</strong> si avisas con 24 hrs o más de anticipación, se devuelve el 100%. Si avisas con menos de 24 hrs, se devuelve el 50%. Si no avisas, la hora se considera asistida y no hay devolución. Si tu reserva presenta algún problema y el sistema no la procesa, comunícate al <strong>+56 9 4170 7439</strong>.
+                  </div>
+                  <label style={{ display: 'flex', alignItems: 'flex-start', gap: 8, fontSize: '0.82rem', color: '#374151', cursor: 'pointer' }}>
+                    <input
+                      type="checkbox"
+                      checked={aceptaPolitica}
+                      onChange={e => setAceptaPolitica(e.target.checked)}
+                      style={{ marginTop: 2 }}
+                    />
+                    <span>He leído y acepto la política de cancelación y devolución.</span>
+                  </label>
+                  {errores.politica && <p className="form-error">{errores.politica}</p>}
                 </div>
 
                 <button className="btn-verde btn-split" onClick={handleReservar} disabled={enviando}>

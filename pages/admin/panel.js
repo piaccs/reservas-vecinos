@@ -96,6 +96,7 @@ export default function AdminPanel() {
     if (tab === 'bloqueos') { cargarHorasBloqueo(); cargarClubes() }
     if (tab === 'clubes') { cargarClubes(); cargarExcepciones() }
     if (tab === 'reservas') cargarTodasReservas()
+    if (tab === 'devoluciones') cargarTodasReservas()
   }, [tab, fechaBloqueo])
 
   async function cargarHorasBloqueo() {
@@ -364,6 +365,16 @@ export default function AdminPanel() {
     await cargarHorasBloqueo()
   }
 
+  async function marcarDevuelta(id) {
+    if (!confirm('¿Confirmas que ya se realizó esta devolución?')) return
+    const { error } = await supabase.from('reservas').update({
+      estado_devolucion: 'procesada',
+      devuelta_en: new Date().toISOString()
+    }).eq('id', id)
+    if (error) alert('Error al actualizar: ' + error.message)
+    else await cargarTodasReservas()
+  }
+
   async function eliminarReserva(id, fecha, hora) {
     if (!confirm(`¿Eliminar la reserva del ${fecha.split('-').reverse().join('/')} a las ${formatHora(hora)}? La hora quedará disponible nuevamente.`)) return
     const { error } = await supabase.from('reservas').delete().eq('id', id)
@@ -431,6 +442,13 @@ export default function AdminPanel() {
   const totalBloqueosIndividuales = bloqueosReporte.filter(b => b.tipo === 'pagado' && !b.motivo?.startsWith('Hora extra —') && !b.motivo?.startsWith('Recuperación —')).reduce((s, b) => s + (b.monto || 0), 0)
   const totalPagosClubs = pagosClubs.reduce((s, p) => s + (p.monto_pagado || 0), 0)
 
+  const devolucionesFiltradas = todasReservas
+    .filter(r => r.estado_devolucion === 'pendiente' || r.estado_devolucion === 'procesada')
+    .sort((a, b) => (a.estado_devolucion === b.estado_devolucion ? 0 : a.estado_devolucion === 'pendiente' ? -1 : 1))
+  const totalDevolucionesPendientes = devolucionesFiltradas
+    .filter(r => r.estado_devolucion === 'pendiente')
+    .reduce((s, r) => s + (r.monto_devolucion || 0), 0)
+
   const reservasFiltradas = todasReservas.filter(r => {
     const hoy = hoyChile()
     if (filtroReservas === 'proximas' && r.fecha < hoy) return false
@@ -455,6 +473,7 @@ export default function AdminPanel() {
     { id: 'clubes',   label: 'Clubes semanales', icon: 'users' },
     { id: 'reporte',  label: 'Reporte mensual', icon: 'chart' },
     { id: 'reservas', label: 'Ver reservas', icon: 'list' },
+    { id: 'devoluciones', label: 'Devoluciones', icon: 'wallet' },
     { id: 'cuenta',   label: 'Mi cuenta', icon: 'settings' },
   ]
 
@@ -1557,6 +1576,86 @@ export default function AdminPanel() {
                       background: 'var(--bg)', fontSize: '0.78rem', color: 'var(--ink-dim)',
                     }}>
                       Mostrando {reservasFiltradas.length} de {todasReservas.length} reservas
+                    </div>
+                  </div>
+                )}
+              </>
+            )}
+
+            {/* ============ TAB DEVOLUCIONES ============ */}
+            {tab === 'devoluciones' && (
+              <>
+                <div className="admin-page-header">
+                  <div>
+                    <div className="kicker">Cancelaciones y rechazos</div>
+                    <h1>Devoluciones</h1>
+                    <p className="subtitle">Reservas canceladas por el vecino o rechazadas por la directiva que requieren devolución de dinero.</p>
+                  </div>
+                </div>
+
+                <div style={{
+                  display: 'flex', gap: 16, marginBottom: 20, padding: '14px 18px',
+                  background: 'var(--card)', border: '1px solid var(--border)', borderRadius: 10
+                }}>
+                  <div>
+                    <div style={{ fontSize: '0.74rem', color: 'var(--ink-dim)' }}>Pendientes por devolver</div>
+                    <div style={{ fontSize: '1.3rem', fontWeight: 700, color: '#dc2626' }}>
+                      ${totalDevolucionesPendientes.toLocaleString('es-CL')}
+                    </div>
+                  </div>
+                </div>
+
+                {cargandoReservas ? (
+                  <div className="loading"><div className="spinner"></div>Cargando…</div>
+                ) : (
+                  <div className="tabla-wrap">
+                    <div style={{ overflowX: 'auto' }}>
+                      <table className="tabla">
+                        <thead>
+                          <tr>
+                            <th>Estado</th>
+                            <th>Fecha</th>
+                            <th>Hora</th>
+                            <th>Vecino</th>
+                            <th>Celular</th>
+                            <th>Motivo</th>
+                            <th>%</th>
+                            <th style={{ textAlign: 'right' }}>Monto a devolver</th>
+                            <th style={{ textAlign: 'right' }}>Acciones</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {devolucionesFiltradas.map(r => (
+                            <tr key={r.id}>
+                              <td>
+                                <span className={`badge ${r.estado_devolucion === 'procesada' ? 'badge-verde' : 'badge-amarillo'}`}>
+                                  <span className="dot"></span>
+                                  {r.estado_devolucion === 'procesada' ? 'Procesada' : 'Pendiente'}
+                                </span>
+                              </td>
+                              <td className="num-strong">{formatFechaCorta(r.fecha)}</td>
+                              <td className="num-strong">{formatHora(r.hora)}</td>
+                              <td>{r.nombre_reservante}</td>
+                              <td className="text-dim">{r.celular}</td>
+                              <td className="text-dim">{r.estado === 'rechazada' ? 'Rechazada por directiva' : 'Cancelada por vecino'}</td>
+                              <td>{r.porcentaje_devolucion != null ? `${r.porcentaje_devolucion}%` : '—'}</td>
+                              <td style={{ textAlign: 'right', color: '#dc2626', fontWeight: 600 }}>
+                                ${(r.monto_devolucion || 0).toLocaleString('es-CL')}
+                              </td>
+                              <td style={{ textAlign: 'right' }}>
+                                {r.estado_devolucion === 'pendiente' && (
+                                  <button className="link-action" onClick={() => marcarDevuelta(r.id)}>Marcar como devuelta</button>
+                                )}
+                              </td>
+                            </tr>
+                          ))}
+                          {devolucionesFiltradas.length === 0 && (
+                            <tr><td colSpan={9} style={{ textAlign: 'center', color: 'var(--ink-dim)', padding: '2rem' }}>
+                              No hay devoluciones pendientes ni procesadas.
+                            </td></tr>
+                          )}
+                        </tbody>
+                      </table>
                     </div>
                   </div>
                 )}

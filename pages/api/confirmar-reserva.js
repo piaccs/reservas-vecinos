@@ -45,6 +45,7 @@ export default async function handler(req, res) {
   const fecha = reserva.fecha.split('-').reverse().join('/')
   const hora = `${reserva.hora.toString().padStart(2,'0')}:00`
   const aceptada = accion === 'aceptar'
+  const baseUrl = process.env.NEXT_PUBLIC_BASE_URL || ''
 
   const nombreSeguro = sanitizarLegacy(reserva.nombre_reservante)
   const emailSeguro = sanitizarLegacy(reserva.email_reservante)
@@ -85,7 +86,12 @@ export default async function handler(req, res) {
             <td style="padding:10px 0;font-weight:700;color:#4d7d14">$${montoFormateado}</td>
           </tr>
         </table>
-        <p style="color:#6b7280;font-size:13px">Por favor llega puntual. Si necesitas cancelar, contáctate con la directiva con anticipación.</p>
+        <p style="color:#6b7280;font-size:13px">Por favor llega puntual.</p>
+        <div style="background:#f4f6f0;border-radius:8px;padding:14px;margin:16px 0">
+          <p style="margin:0 0 8px;font-size:13px;color:#374151"><strong>Política de cancelación:</strong> avisando con 24 hrs o más de anticipación se devuelve el 100%. Avisando con menos de 24 hrs, se devuelve el 50%. Sin aviso, la hora se considera asistida y no hay devolución.</p>
+          ${baseUrl ? `<a href="${baseUrl}/api/cancelar-reserva?id=${encodeURIComponent(id)}" style="color:#dc2626;font-size:13px;font-weight:700;text-decoration:none">No podré asistir — cancelar mi reserva →</a>` : ''}
+        </div>
+        <p style="color:#6b7280;font-size:13px">Si tu reserva presenta algún problema, comunícate al +56 9 4170 7439.</p>
         <p style="color:#6b7280;font-size:13px">— Junta de Vecinos Urbana N°25 Collico</p>
       </div>
     </div>
@@ -114,7 +120,12 @@ export default async function handler(req, res) {
 
     // Actualizar todas las filas del mismo vecino en la misma fecha
     await supabase.from('reservas').update({
-      estado: aceptada ? 'confirmada' : 'rechazada'
+      estado: aceptada ? 'confirmada' : 'rechazada',
+      ...(aceptada ? {} : {
+        estado_devolucion: 'pendiente',
+        porcentaje_devolucion: 100,
+        monto_devolucion: Number(reserva.monto || 10000)
+      })
     })
       .eq('nombre_reservante', reserva.nombre_reservante)
       .eq('fecha', reserva.fecha)
