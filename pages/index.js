@@ -197,7 +197,7 @@ export default function Home() {
       const { data: upload, error: uploadError } = await supabase.storage
         .from('comprobantes')
         .upload(nombreArchivo, comprobante)
-      if (uploadError) throw uploadError
+      if (uploadError) { uploadError.paso = 'subir el comprobante'; throw uploadError }
 
       const { data: urlData } = supabase.storage
         .from('comprobantes')
@@ -219,7 +219,7 @@ export default function Home() {
         .from('reservas')
         .insert(reservasData)
         .select('id')
-      if (reservaError) throw reservaError
+      if (reservaError) { reservaError.paso = 'guardar la reserva'; throw reservaError }
 
       const reservaId = reservaInsertada?.[0]?.id
 
@@ -238,7 +238,8 @@ export default function Home() {
       await cargarHoras()
     } catch (err) {
       console.error(err)
-      alert('Hubo un error al procesar la reserva. Por favor intenta nuevamente o comunícate al +56 9 4170 7439.')
+      const paso = err.paso || 'procesar la reserva'
+      alert(`Hubo un error al ${paso} (${err.message || 'error desconocido'}). Intenta nuevamente, o si el problema persiste envía tu comprobante al +56 9 4170 7439 para gestionar tu reserva manualmente.`)
     } finally {
       setEnviando(false)
     }
