@@ -3,6 +3,7 @@ import { useRouter } from 'next/router'
 import { supabase } from '../../lib/supabase'
 import Head from 'next/head'
 import Icon from '../../components/Icon'
+import * as XLSX from 'xlsx'
 
 const HORAS = Array.from({ length: 15 }, (_, i) => i + 9)
 const DIAS = { 0: 'Domingo', 1: 'Lunes', 2: 'Martes', 3: 'Miércoles', 4: 'Jueves', 5: 'Viernes', 6: 'Sábado' }
@@ -86,6 +87,8 @@ export default function AdminPanel() {
   const [montoDevolucion, setMontoDevolucion] = useState('')
   const [porcentajeDevolucion, setPorcentajeDevolucion] = useState('100')
   const [motivoDevolucion, setMotivoDevolucion] = useState('')
+  const [opEntranteDevolucion, setOpEntranteDevolucion] = useState('')
+  const [opSalienteDevolucion, setOpSalienteDevolucion] = useState('')
   const [cargandoReservas, setCargandoReservas] = useState(false)
   const [filtroReservas, setFiltroReservas] = useState('todas')
   const [busquedaReservas, setBusquedaReservas] = useState('')
@@ -380,7 +383,7 @@ export default function AdminPanel() {
     setDevolucionesManuales(data || [])
   }
 
-  async function registrarDevolucion({ reserva, nombre, celular, monto, porcentaje, motivo }) {
+  async function registrarDevolucion({ reserva, nombre, celular, monto, porcentaje, motivo, opEntrante, opSaliente }) {
     const registro = {
       reserva_id: reserva ? reserva.id : null,
       nombre: reserva ? reserva.nombre_reservante : nombre.trim(),
@@ -388,6 +391,8 @@ export default function AdminPanel() {
       monto: parseInt(monto),
       porcentaje: porcentaje ? parseInt(porcentaje) : null,
       motivo: motivo?.trim() || (reserva ? 'Cancelación registrada manualmente' : 'Depósito sin reserva asociada'),
+      numero_operacion_entrante: opEntrante?.trim() || null,
+      numero_operacion_saliente: opSaliente?.trim() || null,
       estado: 'pendiente'
     }
     if (!registro.nombre || !registro.monto || isNaN(registro.monto)) return alert('Falta nombre o monto válido')
@@ -397,6 +402,8 @@ export default function AdminPanel() {
     setFormDevolucionAbierto(false)
     setBusquedaReservaDevolucion('')
     setReservaSeleccionadaDevolucion(null)
+    setOpEntranteDevolucion('')
+    setOpSalienteDevolucion('')
   }
 
   async function marcarManualDevuelta(id) {
@@ -404,6 +411,25 @@ export default function AdminPanel() {
     const { error } = await supabase.from('devoluciones').update({ estado: 'procesada', devuelta_en: new Date().toISOString() }).eq('id', id)
     if (error) alert('Error al actualizar: ' + error.message)
     else await cargarDevoluciones()
+  }
+
+  function descargarDevolucionesExcel() {
+    const filas = devolucionesFiltradas.map(r => ({
+      Estado: r.estado === 'procesada' ? 'Procesada' : 'Pendiente',
+      Fecha: r.fecha ? formatFechaCorta(r.fecha) : '—',
+      Hora: r.hora != null ? formatHora(r.hora) : '—',
+      Vecino: r.nombre,
+      Celular: r.celular || '—',
+      Motivo: r.motivo,
+      Porcentaje: r.porcentaje != null ? `${r.porcentaje}%` : '—',
+      'Op. entrante': r.opEntrante || '—',
+      'Op. saliente': r.opSaliente || '—',
+      Monto: r.monto || 0
+    }))
+    const ws = XLSX.utils.json_to_sheet(filas)
+    const wb = XLSX.utils.book_new()
+    XLSX.utils.book_append_sheet(wb, ws, 'Devoluciones')
+    XLSX.writeFile(wb, `devoluciones_${hoyChile()}.xlsx`)
   }
 
   async function marcarDevuelta(id) {
@@ -494,7 +520,8 @@ export default function AdminPanel() {
   const devolucionesLibres = devolucionesManuales.map(d => ({
     id: d.id, origen: 'manual', nombre: d.nombre, celular: d.celular,
     fecha: null, hora: null,
-    motivo: d.motivo, porcentaje: d.porcentaje, monto: d.monto, estado: d.estado
+    motivo: d.motivo, porcentaje: d.porcentaje, monto: d.monto, estado: d.estado,
+    opEntrante: d.numero_operacion_entrante, opSaliente: d.numero_operacion_saliente
   }))
   const devolucionesFiltradas = [...devolucionesAuto, ...devolucionesLibres]
     .sort((a, b) => (a.estado === b.estado ? 0 : a.estado === 'pendiente' ? -1 : 1))
@@ -1651,9 +1678,14 @@ export default function AdminPanel() {
                     <h1>Devoluciones</h1>
                     <p className="subtitle">Dinero pendiente de devolver — automático (cancelaciones web, rechazos) o registrado manualmente.</p>
                   </div>
-                  <button className="btn-verde" onClick={() => setFormDevolucionAbierto(v => !v)}>
-                    {formDevolucionAbierto ? 'Cerrar' : '+ Registrar devolución'}
-                  </button>
+                  <div style={{ display: 'flex', gap: 8 }}>
+                    <button className="btn-gris" onClick={descargarDevolucionesExcel} disabled={devolucionesFiltradas.length === 0}>
+                      Descargar Excel
+                    </button>
+                    <button className="btn-verde" onClick={() => setFormDevolucionAbierto(v => !v)}>
+                      {formDevolucionAbierto ? 'Cerrar' : '+ Registrar devolución'}
+                    </button>
+                  </div>
                 </div>
 
                 <div style={{
@@ -1741,6 +1773,17 @@ export default function AdminPanel() {
                       <input className="form-input" placeholder="Ej: avisó por teléfono, depositó sin reservar…" value={motivoDevolucion} onChange={e => setMotivoDevolucion(e.target.value)} />
                     </div>
 
+                    <div style={{ display: 'flex', gap: 12 }}>
+                      <div className="form-grupo" style={{ flex: 1 }}>
+                        <label className="form-label">N° operación entrante</label>
+                        <input className="form-input" placeholder="Transferencia de la reserva" value={opEntranteDevolucion} onChange={e => setOpEntranteDevolucion(e.target.value)} />
+                      </div>
+                      <div className="form-grupo" style={{ flex: 1 }}>
+                        <label className="form-label">N° operación saliente</label>
+                        <input className="form-input" placeholder="Transferencia de la devolución" value={opSalienteDevolucion} onChange={e => setOpSalienteDevolucion(e.target.value)} />
+                      </div>
+                    </div>
+
                     <button
                       className="btn-verde"
                       onClick={() => registrarDevolucion({
@@ -1749,7 +1792,9 @@ export default function AdminPanel() {
                         celular: celularLibreDevolucion,
                         monto: montoDevolucion,
                         porcentaje: porcentajeDevolucion,
-                        motivo: motivoDevolucion
+                        motivo: motivoDevolucion,
+                        opEntrante: opEntranteDevolucion,
+                        opSaliente: opSalienteDevolucion
                       })}
                     >
                       Registrar devolución
@@ -1771,6 +1816,8 @@ export default function AdminPanel() {
                             <th>Celular</th>
                             <th>Motivo</th>
                             <th>%</th>
+                            <th>Op. entrante</th>
+                            <th>Op. saliente</th>
                             <th style={{ textAlign: 'right' }}>Monto a devolver</th>
                             <th style={{ textAlign: 'right' }}>Acciones</th>
                           </tr>
@@ -1789,6 +1836,8 @@ export default function AdminPanel() {
                               <td className="text-dim">{r.celular || '—'}</td>
                               <td className="text-dim">{r.motivo}</td>
                               <td>{r.porcentaje != null ? `${r.porcentaje}%` : '—'}</td>
+                              <td className="text-dim">{r.opEntrante || '—'}</td>
+                              <td className="text-dim">{r.opSaliente || '—'}</td>
                               <td style={{ textAlign: 'right', color: '#dc2626', fontWeight: 600 }}>
                                 ${(r.monto || 0).toLocaleString('es-CL')}
                               </td>
@@ -1803,7 +1852,7 @@ export default function AdminPanel() {
                             </tr>
                           ))}
                           {devolucionesFiltradas.length === 0 && (
-                            <tr><td colSpan={8} style={{ textAlign: 'center', color: 'var(--ink-dim)', padding: '2rem' }}>
+                            <tr><td colSpan={10} style={{ textAlign: 'center', color: 'var(--ink-dim)', padding: '2rem' }}>
                               No hay devoluciones pendientes ni procesadas.
                             </td></tr>
                           )}
