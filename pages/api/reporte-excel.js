@@ -22,7 +22,7 @@ export default async function handler(req, res) {
   if (req.method !== 'POST') return res.status(405).end()
   if (!requireAdmin(req, res)) return
 
-  const { mes, reservas = [], bloqueos = [], excepciones = [], clubes = [], devoluciones = [] } = req.body
+  const { mes, reservas = [], bloqueos = [], excepciones = [], clubes = [], devoluciones = [], pagosClubs = [] } = req.body
   const [year, month] = mes.split('-')
   const nombreMes = new Date(year, month - 1).toLocaleString('es-CL', { month: 'long', year: 'numeric' })
 
@@ -117,14 +117,22 @@ export default async function handler(req, res) {
 
   // Hoja 4: Resumen
   const totalDevoluciones = devoluciones.reduce((s, d) => s + (d.monto || 0), 0)
-  const totalBruto = totalReservas + totalClubes
+  const totalPagosClubsReal = pagosClubs.reduce((s, p) => s + (p.monto_pagado || 0), 0)
+  const bloqueosIndividuales = bloqueos.filter(b => b.tipo === 'pagado' && !b.motivo?.startsWith('Hora extra —') && !b.motivo?.startsWith('Recuperación —'))
+  const totalBloqueosIndividuales = bloqueosIndividuales.reduce((s, b) => s + (b.monto || 0), 0)
+  // Este es el mismo cálculo que usa la página de administración para "Total ingresos",
+  // basado en pagos y bloqueos realmente registrados (no en la proyección por horario).
+  const totalBruto = totalReservas + totalBloqueosIndividuales + totalPagosClubsReal
   const resumenRows = [
     ['RESUMEN MENSUAL — GIMNASIO COLLICO'],
     [`Mes: ${nombreMes.toUpperCase()}`],
     [],
     ['Concepto', 'Cantidad', 'Total ($)'],
     ['Reservas de vecinos', reservas.length, totalReservas],
-    ['Ingresos por clubes (pagados)', Object.values(clubsAgrupados).filter(d => d[0].tipo === 'pagado').length, totalClubes],
+    ['Pagos de clubes registrados', pagosClubs.length, totalPagosClubsReal],
+    ['Horas bloqueadas pagadas (individuales)', bloqueosIndividuales.length, totalBloqueosIndividuales],
+    [],
+    ['Ref: ingresos por clubes según horario programado (hoja Clubes)', '', totalClubes],
     ['Clubes gratuitos / convenio', Object.values(clubsAgrupados).filter(d => d[0].tipo === 'gratuito').length, 0],
     ['Excepciones: sobrebloqueadas', excepciones.filter(e => e.tipo === 'sobrebloqueada').length, 0],
     ['Excepciones: con aviso previo', excepciones.filter(e => e.tipo === 'aviso_anticipado').length, 0],

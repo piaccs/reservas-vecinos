@@ -566,7 +566,7 @@ export default function AdminPanel() {
     const res = await fetch('/api/reporte-excel', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ mes: mesReporte, reservas: reservasReporte, bloqueos: bloqueosReporte, excepciones: excepcionesReporte, clubes: clubesSemanales, devoluciones: devolucionesReporte })
+      body: JSON.stringify({ mes: mesReporte, reservas: reservasReporte, bloqueos: bloqueosReporte, excepciones: excepcionesReporte, clubes: clubesSemanales, devoluciones: devolucionesReporte, pagosClubs })
     })
     const blob = await res.blob()
     const url = URL.createObjectURL(blob)
