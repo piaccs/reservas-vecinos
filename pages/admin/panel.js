@@ -72,6 +72,7 @@ export default function AdminPanel() {
   const [pagosClubs, setPagosClubs] = useState([])
   const [clubesSemanales, setClubesSemanales] = useState([])
   const [excepcionesReporte, setExcepcionesReporte] = useState([])
+  const [devolucionesReporte, setDevolucionesReporte] = useState([])
   const [nuevoPago, setNuevoPago] = useState({ nombre_club: '', monto_pagado: '', fecha_pago: hoyChile(), mes_uso: new Date().toISOString().slice(0,7).split('-').map((v,i) => i===1 ? String(parseInt(v)-1).padStart(2,'0') : v).join('-'), numero_operacion: '', notas: '' })
   const [guardandoPago, setGuardandoPago] = useState(false)
 
@@ -89,6 +90,7 @@ export default function AdminPanel() {
   const [motivoDevolucion, setMotivoDevolucion] = useState('')
   const [opEntranteDevolucion, setOpEntranteDevolucion] = useState('')
   const [opSalienteDevolucion, setOpSalienteDevolucion] = useState('')
+  const [devolucionEditando, setDevolucionEditando] = useState(null)
   const [cargandoReservas, setCargandoReservas] = useState(false)
   const [filtroReservas, setFiltroReservas] = useState('todas')
   const [busquedaReservas, setBusquedaReservas] = useState('')
@@ -399,11 +401,79 @@ export default function AdminPanel() {
     const { error } = await supabase.from('devoluciones').insert(registro)
     if (error) return alert('Error al registrar: ' + error.message)
     await cargarDevoluciones()
+    cerrarFormDevolucion()
+  }
+
+  function cerrarFormDevolucion() {
     setFormDevolucionAbierto(false)
+    setDevolucionEditando(null)
     setBusquedaReservaDevolucion('')
     setReservaSeleccionadaDevolucion(null)
+    setNombreLibreDevolucion('')
+    setCelularLibreDevolucion('')
+    setMontoDevolucion('')
+    setPorcentajeDevolucion('100')
+    setMotivoDevolucion('')
     setOpEntranteDevolucion('')
     setOpSalienteDevolucion('')
+  }
+
+  function abrirEdicionDevolucion(r) {
+    setDevolucionEditando(r)
+    setNombreLibreDevolucion(r.nombre || '')
+    setCelularLibreDevolucion(r.celular || '')
+    setMontoDevolucion(r.monto != null ? String(r.monto) : '')
+    setPorcentajeDevolucion(r.porcentaje != null ? String(r.porcentaje) : '')
+    setMotivoDevolucion(r.motivo || '')
+    setOpEntranteDevolucion(r.opEntrante || '')
+    setOpSalienteDevolucion(r.opSaliente || '')
+    setFormDevolucionAbierto(true)
+  }
+
+  async function guardarEdicionDevolucion() {
+    const monto = parseInt(montoDevolucion)
+    const porcentaje = porcentajeDevolucion ? parseInt(porcentajeDevolucion) : null
+    if (!monto || isNaN(monto)) return alert('Falta un monto válido')
+    if (devolucionEditando.origen === 'manual') {
+      const { error } = await supabase.from('devoluciones').update({
+        nombre: nombreLibreDevolucion.trim() || devolucionEditando.nombre,
+        celular: celularLibreDevolucion?.trim() || null,
+        monto,
+        porcentaje,
+        motivo: motivoDevolucion?.trim() || devolucionEditando.motivo,
+        numero_operacion_entrante: opEntranteDevolucion?.trim() || null,
+        numero_operacion_saliente: opSalienteDevolucion?.trim() || null,
+      }).eq('id', devolucionEditando.id)
+      if (error) return alert('Error al actualizar: ' + error.message)
+      await cargarDevoluciones()
+    } else {
+      // Devolución automática (ligada a una reserva): solo monto y porcentaje son editables
+      const { error } = await supabase.from('reservas').update({
+        porcentaje_devolucion: porcentaje,
+        monto_devolucion: monto,
+      }).eq('id', devolucionEditando.id)
+      if (error) return alert('Error al actualizar: ' + error.message)
+      await cargarTodasReservas()
+    }
+    cerrarFormDevolucion()
+  }
+
+  async function eliminarDevolucion(r) {
+    const msg = r.origen === 'manual'
+      ? `¿Eliminar esta devolución de ${r.nombre} por $${(r.monto || 0).toLocaleString('es-CL')}? Esta acción no se puede deshacer.`
+      : `¿Eliminar el registro de devolución de ${r.nombre} por $${(r.monto || 0).toLocaleString('es-CL')}? La reserva quedará sin devolución asociada.`
+    if (!confirm(msg)) return
+    if (r.origen === 'manual') {
+      const { error } = await supabase.from('devoluciones').delete().eq('id', r.id)
+      if (error) return alert('Error al eliminar: ' + error.message)
+      await cargarDevoluciones()
+    } else {
+      const { error } = await supabase.from('reservas').update({
+        estado_devolucion: null, porcentaje_devolucion: null, monto_devolucion: null, devuelta_en: null
+      }).eq('id', r.id)
+      if (error) return alert('Error al eliminar: ' + error.message)
+      await cargarTodasReservas()
+    }
   }
 
   async function marcarManualDevuelta(id) {
@@ -461,9 +531,26 @@ export default function AdminPanel() {
       .gte('fecha', inicio).lte('fecha', fin).order('fecha').order('hora')
     const { data: excepciones } = await supabase.from('excepciones_clubes').select('*')
       .gte('fecha', inicio).lte('fecha', fin)
+    const inicioTs = `${inicio}T00:00:00`
+    const finTs = `${fin}T23:59:59`
+    const { data: devolucionesAutoMes } = await supabase.from('reservas').select('*')
+      .eq('estado_devolucion', 'procesada').gte('devuelta_en', inicioTs).lte('devuelta_en', finTs)
+    const { data: devolucionesManualesMes } = await supabase.from('devoluciones').select('*')
+      .eq('estado', 'procesada').gte('devuelta_en', inicioTs).lte('devuelta_en', finTs)
+    const devolucionesMes = [
+      ...(devolucionesAutoMes || []).map(r => ({
+        nombre: r.nombre_reservante, celular: r.celular, monto: r.monto_devolucion || 0,
+        motivo: r.estado === 'rechazada' ? 'Rechazada por directiva' : 'Cancelada por vecino (aviso web)',
+        devuelta_en: r.devuelta_en
+      })),
+      ...(devolucionesManualesMes || []).map(d => ({
+        nombre: d.nombre, celular: d.celular, monto: d.monto || 0, motivo: d.motivo, devuelta_en: d.devuelta_en
+      })),
+    ]
     setReservasReporte(reservas || [])
     setBloqueosReporte(bloqueos || [])
     setExcepcionesReporte(excepciones || [])
+    setDevolucionesReporte(devolucionesMes)
     await cargarPagosClubs(mesReporte)
     await cargarClubesSemanales()
     setCargandoReporte(false)
@@ -474,7 +561,7 @@ export default function AdminPanel() {
     const res = await fetch('/api/reporte-excel', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ mes: mesReporte, reservas: reservasReporte, bloqueos: bloqueosReporte, excepciones: excepcionesReporte, clubes: clubesSemanales })
+      body: JSON.stringify({ mes: mesReporte, reservas: reservasReporte, bloqueos: bloqueosReporte, excepciones: excepcionesReporte, clubes: clubesSemanales, devoluciones: devolucionesReporte })
     })
     const blob = await res.blob()
     const url = URL.createObjectURL(blob)
@@ -1682,7 +1769,7 @@ export default function AdminPanel() {
                     <button className="btn-gris" onClick={descargarDevolucionesExcel} disabled={devolucionesFiltradas.length === 0}>
                       Descargar Excel
                     </button>
-                    <button className="btn-verde" onClick={() => setFormDevolucionAbierto(v => !v)}>
+                    <button className="btn-verde" onClick={() => formDevolucionAbierto ? cerrarFormDevolucion() : setFormDevolucionAbierto(true)}>
                       {formDevolucionAbierto ? 'Cerrar' : '+ Registrar devolución'}
                     </button>
                   </div>
@@ -1702,18 +1789,29 @@ export default function AdminPanel() {
 
                 {formDevolucionAbierto && (
                   <div className="tabla-wrap" style={{ padding: 20, marginBottom: 20 }}>
-                    <div style={{ display: 'flex', gap: 8, marginBottom: 16 }}>
-                      <button
-                        className={`btn-pill ${modoDevolucion === 'reserva' ? 'active' : ''}`}
-                        onClick={() => { setModoDevolucion('reserva'); setReservaSeleccionadaDevolucion(null) }}
-                      >Buscar reserva existente</button>
-                      <button
-                        className={`btn-pill ${modoDevolucion === 'libre' ? 'active' : ''}`}
-                        onClick={() => { setModoDevolucion('libre'); setReservaSeleccionadaDevolucion(null) }}
-                      >Sin reserva (depósito sin reservar)</button>
-                    </div>
+                    {devolucionEditando && (
+                      <div style={{ marginBottom: 16, fontSize: '0.86rem' }}>
+                        Editando devolución de <strong>{devolucionEditando.nombre}</strong>
+                        {devolucionEditando.origen === 'auto' && (
+                          <span className="text-dim"> — {formatFechaCorta(devolucionEditando.fecha)} {formatHora(devolucionEditando.hora)} (ligada a una reserva: solo monto y % son editables)</span>
+                        )}
+                      </div>
+                    )}
 
-                    {modoDevolucion === 'reserva' ? (
+                    {!devolucionEditando && (
+                      <div style={{ display: 'flex', gap: 8, marginBottom: 16 }}>
+                        <button
+                          className={`btn-pill ${modoDevolucion === 'reserva' ? 'active' : ''}`}
+                          onClick={() => { setModoDevolucion('reserva'); setReservaSeleccionadaDevolucion(null) }}
+                        >Buscar reserva existente</button>
+                        <button
+                          className={`btn-pill ${modoDevolucion === 'libre' ? 'active' : ''}`}
+                          onClick={() => { setModoDevolucion('libre'); setReservaSeleccionadaDevolucion(null) }}
+                        >Sin reserva (depósito sin reservar)</button>
+                      </div>
+                    )}
+
+                    {!devolucionEditando && (modoDevolucion === 'reserva' ? (
                       <>
                         {!reservaSeleccionadaDevolucion ? (
                           <div className="form-grupo">
@@ -1756,6 +1854,19 @@ export default function AdminPanel() {
                           <input className="form-input" value={celularLibreDevolucion} onChange={e => setCelularLibreDevolucion(e.target.value)} />
                         </div>
                       </>
+                    ))}
+
+                    {devolucionEditando && devolucionEditando.origen === 'manual' && (
+                      <>
+                        <div className="form-grupo">
+                          <label className="form-label">Nombre *</label>
+                          <input className="form-input" value={nombreLibreDevolucion} onChange={e => setNombreLibreDevolucion(e.target.value)} />
+                        </div>
+                        <div className="form-grupo">
+                          <label className="form-label">Celular</label>
+                          <input className="form-input" value={celularLibreDevolucion} onChange={e => setCelularLibreDevolucion(e.target.value)} />
+                        </div>
+                      </>
                     )}
 
                     <div style={{ display: 'flex', gap: 12 }}>
@@ -1768,37 +1879,47 @@ export default function AdminPanel() {
                         <input className="form-input" type="number" value={porcentajeDevolucion} onChange={e => setPorcentajeDevolucion(e.target.value)} />
                       </div>
                     </div>
-                    <div className="form-grupo">
-                      <label className="form-label">Motivo (opcional)</label>
-                      <input className="form-input" placeholder="Ej: avisó por teléfono, depositó sin reservar…" value={motivoDevolucion} onChange={e => setMotivoDevolucion(e.target.value)} />
-                    </div>
 
-                    <div style={{ display: 'flex', gap: 12 }}>
-                      <div className="form-grupo" style={{ flex: 1 }}>
-                        <label className="form-label">N° operación entrante</label>
-                        <input className="form-input" placeholder="Transferencia de la reserva" value={opEntranteDevolucion} onChange={e => setOpEntranteDevolucion(e.target.value)} />
-                      </div>
-                      <div className="form-grupo" style={{ flex: 1 }}>
-                        <label className="form-label">N° operación saliente</label>
-                        <input className="form-input" placeholder="Transferencia de la devolución" value={opSalienteDevolucion} onChange={e => setOpSalienteDevolucion(e.target.value)} />
-                      </div>
-                    </div>
+                    {(!devolucionEditando || devolucionEditando.origen === 'manual') && (
+                      <>
+                        <div className="form-grupo">
+                          <label className="form-label">Motivo (opcional)</label>
+                          <input className="form-input" placeholder="Ej: avisó por teléfono, depositó sin reservar…" value={motivoDevolucion} onChange={e => setMotivoDevolucion(e.target.value)} />
+                        </div>
 
-                    <button
-                      className="btn-verde"
-                      onClick={() => registrarDevolucion({
-                        reserva: modoDevolucion === 'reserva' ? reservaSeleccionadaDevolucion : null,
-                        nombre: nombreLibreDevolucion,
-                        celular: celularLibreDevolucion,
-                        monto: montoDevolucion,
-                        porcentaje: porcentajeDevolucion,
-                        motivo: motivoDevolucion,
-                        opEntrante: opEntranteDevolucion,
-                        opSaliente: opSalienteDevolucion
-                      })}
-                    >
-                      Registrar devolución
-                    </button>
+                        <div style={{ display: 'flex', gap: 12 }}>
+                          <div className="form-grupo" style={{ flex: 1 }}>
+                            <label className="form-label">N° operación entrante</label>
+                            <input className="form-input" placeholder="Transferencia de la reserva" value={opEntranteDevolucion} onChange={e => setOpEntranteDevolucion(e.target.value)} />
+                          </div>
+                          <div className="form-grupo" style={{ flex: 1 }}>
+                            <label className="form-label">N° operación saliente</label>
+                            <input className="form-input" placeholder="Transferencia de la devolución" value={opSalienteDevolucion} onChange={e => setOpSalienteDevolucion(e.target.value)} />
+                          </div>
+                        </div>
+                      </>
+                    )}
+
+                    <div style={{ display: 'flex', gap: 8 }}>
+                      <button
+                        className="btn-verde"
+                        onClick={() => devolucionEditando ? guardarEdicionDevolucion() : registrarDevolucion({
+                          reserva: modoDevolucion === 'reserva' ? reservaSeleccionadaDevolucion : null,
+                          nombre: nombreLibreDevolucion,
+                          celular: celularLibreDevolucion,
+                          monto: montoDevolucion,
+                          porcentaje: porcentajeDevolucion,
+                          motivo: motivoDevolucion,
+                          opEntrante: opEntranteDevolucion,
+                          opSaliente: opSalienteDevolucion
+                        })}
+                      >
+                        {devolucionEditando ? 'Guardar cambios' : 'Registrar devolución'}
+                      </button>
+                      {devolucionEditando && (
+                        <button className="btn-gris" onClick={cerrarFormDevolucion}>Cancelar</button>
+                      )}
+                    </div>
                   </div>
                 )}
 
@@ -1841,13 +1962,17 @@ export default function AdminPanel() {
                               <td style={{ textAlign: 'right', color: '#dc2626', fontWeight: 600 }}>
                                 ${(r.monto || 0).toLocaleString('es-CL')}
                               </td>
-                              <td style={{ textAlign: 'right' }}>
+                              <td style={{ textAlign: 'right', whiteSpace: 'nowrap' }}>
                                 {r.estado === 'pendiente' && (
                                   <button
                                     className="link-action"
                                     onClick={() => r.origen === 'auto' ? marcarDevuelta(r.id) : marcarManualDevuelta(r.id)}
                                   >Marcar como devuelta</button>
                                 )}
+                                {' '}
+                                <button className="link-action" onClick={() => abrirEdicionDevolucion(r)}>Editar</button>
+                                {' '}
+                                <button className="link-action" style={{ color: '#dc2626' }} onClick={() => eliminarDevolucion(r)}>Eliminar</button>
                               </td>
                             </tr>
                           ))}

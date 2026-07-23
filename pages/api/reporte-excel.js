@@ -22,7 +22,7 @@ export default async function handler(req, res) {
   if (req.method !== 'POST') return res.status(405).end()
   if (!requireAdmin(req, res)) return
 
-  const { mes, reservas = [], bloqueos = [], excepciones = [], clubes = [] } = req.body
+  const { mes, reservas = [], bloqueos = [], excepciones = [], clubes = [], devoluciones = [] } = req.body
   const [year, month] = mes.split('-')
   const nombreMes = new Date(year, month - 1).toLocaleString('es-CL', { month: 'long', year: 'numeric' })
 
@@ -116,6 +116,8 @@ export default async function handler(req, res) {
   XLSX.utils.book_append_sheet(wb, ws3, 'Reservas')
 
   // Hoja 4: Resumen
+  const totalDevoluciones = devoluciones.reduce((s, d) => s + (d.monto || 0), 0)
+  const totalBruto = totalReservas + totalClubes
   const resumenRows = [
     ['RESUMEN MENSUAL — GIMNASIO COLLICO'],
     [`Mes: ${nombreMes.toUpperCase()}`],
@@ -128,7 +130,10 @@ export default async function handler(req, res) {
     ['Excepciones: con aviso previo', excepciones.filter(e => e.tipo === 'aviso_anticipado').length, 0],
     ['Excepciones: recuperaciones', excepciones.filter(e => e.tipo === 'recuperacion').length, 0],
     [],
-    ['TOTAL INGRESOS DEL MES', '', totalReservas + totalClubes],
+    ['TOTAL INGRESOS DEL MES (bruto)', '', totalBruto],
+    ['- Devoluciones', devoluciones.length, -totalDevoluciones],
+    [],
+    ['TOTAL EFECTIVAMENTE PERCIBIDO', '', totalBruto - totalDevoluciones],
   ]
   const ws4 = XLSX.utils.aoa_to_sheet(resumenRows)
   ws4['!cols'] = [{ wch: 42 }, { wch: 12 }, { wch: 16 }]
