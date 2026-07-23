@@ -600,6 +600,8 @@ export default function AdminPanel() {
   const totalBloqueosPagados = bloqueosReporte.filter(b => b.tipo === 'pagado').reduce((s, b) => s + (b.monto || 0), 0)
   const totalBloqueosIndividuales = bloqueosReporte.filter(b => b.tipo === 'pagado' && !b.motivo?.startsWith('Hora extra —') && !b.motivo?.startsWith('Recuperación —')).reduce((s, b) => s + (b.monto || 0), 0)
   const totalPagosClubs = pagosClubs.reduce((s, p) => s + (p.monto_pagado || 0), 0)
+  const totalDevolucionesReporte = devolucionesReporte.reduce((s, d) => s + (d.monto || 0), 0)
+  const totalIngresosNeto = totalReservas + totalBloqueosIndividuales + totalPagosClubs - totalDevolucionesReporte
 
   const devolucionesAuto = todasReservas
     .filter(r => r.estado_devolucion === 'pendiente' || r.estado_devolucion === 'procesada')
@@ -1395,8 +1397,11 @@ export default function AdminPanel() {
                       </div>
                       <div className="stat-card">
                         <div className="label">Total ingresos</div>
-                        <div className="value">${(totalReservas + totalBloqueosIndividuales + totalPagosClubs).toLocaleString('es-CL')}</div>
-                        <div className="sub">reservas + bloqueos pagados</div>
+                        <div className="value">${totalIngresosNeto.toLocaleString('es-CL')}</div>
+                        <div className="sub">
+                          reservas + bloqueos pagados
+                          {totalDevolucionesReporte > 0 && ` − $${totalDevolucionesReporte.toLocaleString('es-CL')} devoluciones`}
+                        </div>
                       </div>
                     </div>
 
