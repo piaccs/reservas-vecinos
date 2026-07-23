@@ -63,6 +63,7 @@ export default function AdminPanel() {
   const [clubConAviso, setClubConAviso] = useState(null)
   const [avisoForm, setAvisoForm] = useState({ fecha: hoyChile(), horas: [], liberar: true, notas: '' })
   const [guardandoAviso, setGuardandoAviso] = useState(false)
+  const [avisosExpandidos, setAvisosExpandidos] = useState({})
 
   // Reporte
   const [mesReporte, setMesReporte] = useState(new Date().toISOString().slice(0, 7))
@@ -435,7 +436,7 @@ export default function AdminPanel() {
     const porcentaje = porcentajeDevolucion ? parseInt(porcentajeDevolucion) : null
     if (!monto || isNaN(monto)) return alert('Falta un monto válido')
     if (devolucionEditando.origen === 'manual') {
-      const { error } = await supabase.from('devoluciones').update({
+      const { data, error } = await supabase.from('devoluciones').update({
         nombre: nombreLibreDevolucion.trim() || devolucionEditando.nombre,
         celular: celularLibreDevolucion?.trim() || null,
         monto,
@@ -443,16 +444,18 @@ export default function AdminPanel() {
         motivo: motivoDevolucion?.trim() || devolucionEditando.motivo,
         numero_operacion_entrante: opEntranteDevolucion?.trim() || null,
         numero_operacion_saliente: opSalienteDevolucion?.trim() || null,
-      }).eq('id', devolucionEditando.id)
+      }).eq('id', devolucionEditando.id).select()
       if (error) return alert('Error al actualizar: ' + error.message)
+      if (!data || data.length === 0) return alert('No se pudo guardar: Supabase bloqueó la operación (falta permiso RLS de UPDATE en la tabla "devoluciones"). Revisa las políticas en el dashboard de Supabase.')
       await cargarDevoluciones()
     } else {
       // Devolución automática (ligada a una reserva): solo monto y porcentaje son editables
-      const { error } = await supabase.from('reservas').update({
+      const { data, error } = await supabase.from('reservas').update({
         porcentaje_devolucion: porcentaje,
         monto_devolucion: monto,
-      }).eq('id', devolucionEditando.id)
+      }).eq('id', devolucionEditando.id).select()
       if (error) return alert('Error al actualizar: ' + error.message)
+      if (!data || data.length === 0) return alert('No se pudo guardar: Supabase bloqueó la operación (falta permiso RLS de UPDATE en la tabla "reservas"). Revisa las políticas en el dashboard de Supabase.')
       await cargarTodasReservas()
     }
     cerrarFormDevolucion()
@@ -464,14 +467,16 @@ export default function AdminPanel() {
       : `¿Eliminar el registro de devolución de ${r.nombre} por $${(r.monto || 0).toLocaleString('es-CL')}? La reserva quedará sin devolución asociada.`
     if (!confirm(msg)) return
     if (r.origen === 'manual') {
-      const { error } = await supabase.from('devoluciones').delete().eq('id', r.id)
+      const { data, error } = await supabase.from('devoluciones').delete().eq('id', r.id).select()
       if (error) return alert('Error al eliminar: ' + error.message)
+      if (!data || data.length === 0) return alert('No se pudo eliminar: Supabase bloqueó la operación (falta permiso RLS de DELETE en la tabla "devoluciones"). Revisa las políticas en el dashboard de Supabase.')
       await cargarDevoluciones()
     } else {
-      const { error } = await supabase.from('reservas').update({
+      const { data, error } = await supabase.from('reservas').update({
         estado_devolucion: null, porcentaje_devolucion: null, monto_devolucion: null, devuelta_en: null
-      }).eq('id', r.id)
+      }).eq('id', r.id).select()
       if (error) return alert('Error al eliminar: ' + error.message)
+      if (!data || data.length === 0) return alert('No se pudo eliminar: Supabase bloqueó la operación (falta permiso RLS de UPDATE en la tabla "reservas"). Revisa las políticas en el dashboard de Supabase.')
       await cargarTodasReservas()
     }
   }
@@ -1180,13 +1185,17 @@ export default function AdminPanel() {
                                     </tbody>
                                   </table>
                                   {/* Avisos de ausencia registrados */}
-                                  {excepcionesGuardadas.filter(e => e.nombre_club === nombre && e.tipo === 'aviso_anticipado').length > 0 && (
+                                  {excepcionesGuardadas.filter(e => e.nombre_club === nombre && e.tipo === 'aviso_anticipado').length > 0 && (() => {
+                                    const avisosClub = excepcionesGuardadas.filter(e => e.nombre_club === nombre && e.tipo === 'aviso_anticipado')
+                                    const expandido = !!avisosExpandidos[nombre]
+                                    const LIMITE = 5
+                                    const avisosAMostrar = expandido ? avisosClub : avisosClub.slice(0, LIMITE)
+                                    return (
                                     <div style={{ marginTop: 14, display: 'flex', flexDirection: 'column', gap: 6 }}>
                                       <div style={{ fontSize: '0.8rem', fontWeight: 600, color: 'var(--ink)' }}>
                                         Avisos de ausencia registrados:
                                       </div>
-                                      {excepcionesGuardadas
-                                        .filter(e => e.nombre_club === nombre && e.tipo === 'aviso_anticipado')
+                                      {avisosAMostrar
                                         .map(e => (
                                           <div key={e.id} style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10, fontSize: '0.82rem', background: 'var(--bg)', border: '1px solid var(--border-soft)', borderRadius: 8, padding: '6px 10px' }}>
                                             <span>
@@ -1203,8 +1212,19 @@ export default function AdminPanel() {
                                             </button>
                                           </div>
                                         ))}
+                                      {avisosClub.length > LIMITE && (
+                                        <button
+                                          type="button"
+                                          className="link-action"
+                                          style={{ alignSelf: 'flex-start' }}
+                                          onClick={(ev) => { ev.stopPropagation(); setAvisosExpandidos(prev => ({ ...prev, [nombre]: !expandido })) }}
+                                        >
+                                          {expandido ? 'Ver menos' : `Ver todos (${avisosClub.length})`}
+                                        </button>
+                                      )}
                                     </div>
-                                  )}
+                                    )
+                                  })()}
                                   {/* Botón aviso ausencia */}
                                   <div style={{ marginTop: 12 }}>
                                     {clubConAviso === nombre ? (
